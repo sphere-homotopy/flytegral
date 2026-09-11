@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f5f7fb" />
+    <title>Flytegral — fruit fly integral estimator</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="demo-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">fruit fly numerical intuition</p>
+          <h1>Flytegral</h1>
+        </div>
+        <div class="topbar-actions">
+          <span class="agent-badge"><span class="status-dot"></span>baseline agent</span>
+          <span class="seed-chip">seed <strong id="seed-value">—</strong></span>
+          <button id="record-demo" class="button button-secondary" type="button">Record demo</button>
+          <button id="new-problem" class="button" type="button">New problem</button>
+        </div>
+      </header>
+
+      <section class="flow" id="demo-stage" aria-label="Graph to fly to numerical answer">
+        <article class="graph-card panel">
+          <div class="panel-heading">
+            <div>
+              <span class="panel-kicker">stimulus</span>
+              <div id="equation" class="equation">f(x) = …</div>
+            </div>
+            <div id="interval-chip" class="interval-chip">[a, b]</div>
+          </div>
+          <div class="graph-wrap">
+            <canvas id="graph-canvas" width="760" height="480" aria-label="Polynomial function graph"></canvas>
+            <div class="graph-corner-label">∫<sub>a</sub><sup>b</sup> f(x) dx</div>
+          </div>
+        </article>
+
+        <div class="flow-arrow flow-arrow-left" aria-hidden="true"><span></span></div>
+
+        <section class="fly-stage" aria-label="Fruit fly agent">
+          <div class="activity-field" aria-hidden="true">
+            <span class="activity-ring ring-one"></span>
+            <span class="activity-ring ring-two"></span>
+            <span class="activity-ring ring-three"></span>
+            <span class="spark spark-one"></span>
+            <span class="spark spark-two"></span>
+            <span class="spark spark-three"></span>
+            <span class="spark spark-four"></span>
+          </div>
+
+          <svg id="fly-agent" class="fly-agent" viewBox="0 0 220 220" role="img" aria-label="Animated fruit fly">
+            <defs>
+              <linearGradient id="bodyGradient" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stop-color="#2b2b35" />
+                <stop offset="100%" stop-color="#111118" />
+              </linearGradient>
+              <radialGradient id="eyeGradient">
+                <stop offset="0%" stop-color="#ff7d6b" />
+                <stop offset="70%" stop-color="#d52c43" />
+                <stop offset="100%" stop-color="#80172a" />
+              </radialGradient>
+            </defs>
+            <g class="fly-tilt">
+              <g class="wing wing-left">
+                <ellipse cx="69" cy="72" rx="45" ry="27" transform="rotate(-28 69 72)" />
+                <path d="M39 72 C59 54 78 48 99 50" />
+              </g>
+              <g class="wing wing-right">
+                <ellipse cx="151" cy="72" rx="45" ry="27" transform="rotate(28 151 72)" />
+                <path d="M121 50 C142 48 161 54 181 72" />
+              </g>
+              <ellipse class="abdomen" cx="110" cy="132" rx="38" ry="58" fill="url(#bodyGradient)" />
+              <path class="stripe" d="M78 121 Q110 132 142 121" />
+              <path class="stripe" d="M76 139 Q110 150 144 139" />
+              <ellipse class="thorax" cx="110" cy="92" rx="33" ry="36" fill="#25252d" />
+              <circle class="head" cx="110" cy="59" r="31" fill="#363640" />
+              <circle class="eye eye-left" cx="94" cy="55" r="15" fill="url(#eyeGradient)" />
+              <circle class="eye eye-right" cx="126" cy="55" r="15" fill="url(#eyeGradient)" />
+              <circle class="eye-glint" cx="90" cy="50" r="4" />
+              <circle class="eye-glint" cx="122" cy="50" r="4" />
+              <path class="leg" d="M88 113 Q51 132 39 165" />
+              <path class="leg" d="M132 113 Q169 132 181 165" />
+              <path class="leg" d="M90 133 Q62 159 64 191" />
+              <path class="leg" d="M130 133 Q158 159 156 191" />
+              <path class="antenna" d="M97 34 Q82 15 70 19" />
+              <path class="antenna" d="M123 34 Q138 15 150 19" />
+            </g>
+          </svg>
+
+          <div class="fly-caption">
+            <span class="thinking-label" id="thinking-label">watching graph</span>
+            <strong>Drosophila</strong>
+            <small>baseline</small>
+          </div>
+        </section>
+
+        <div class="flow-arrow flow-arrow-right" aria-hidden="true"><span></span></div>
+
+        <article class="answer-card panel">
+          <div class="panel-heading answer-heading">
+            <div>
+              <span class="panel-kicker">fly answer</span>
+              <div class="answer-live" id="answer-live">0.00</div>
+            </div>
+            <span class="confidence" id="confidence">—</span>
+          </div>
+
+          <div class="slider-zone">
+            <input
+              id="answer-slider"
+              class="answer-slider"
+              type="range"
+              min="0"
+              max="1000"
+              value="500"
+              tabindex="-1"
+              aria-label="Fly numerical answer"
+            />
+            <div class="slider-scale">
+              <span id="slider-min">−</span>
+              <span>0</span>
+              <span id="slider-max">+</span>
+            </div>
+          </div>
+
+          <div class="results" id="results" aria-live="polite">
+            <div class="metric">
+              <span>target integral</span>
+              <strong id="target-value">—</strong>
+            </div>
+            <div class="metric">
+              <span>fly answer</span>
+              <strong id="prediction-value">—</strong>
+            </div>
+            <div class="metric metric-error">
+              <span>absolute error</span>
+              <strong id="error-value">—</strong>
+            </div>
+          </div>
+
+          <div class="error-banner" id="error-banner" hidden></div>
+        </article>
+      </section>
+
+      <footer class="footer-note">
+        <span>visual benchmark • exact polynomial target • transparent baseline</span>
+        <span id="recording-status"></span>
+      </footer>
+    </main>
+
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>
