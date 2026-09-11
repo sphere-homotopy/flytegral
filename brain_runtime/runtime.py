@@ -81,6 +81,43 @@ def _reset_brain(brain: Any) -> None:
     brain.sim_ms = 0
 
 
+def activity_features(brain: Any, stimulus: dict[str, Any], *, bins: int = 512, frame_ms: float = 20.0, repeats: int = 4):
+    """Run a reset whole-brain stimulus trial and return projected spike-rate features."""
+    width = int(stimulus.get("width", 0))
+    height = int(stimulus.get("height", 0))
+    values = np.asarray(stimulus.get("luminance", []), dtype=np.float32)
+    if width < 2 or height < 2 or values.size != width * height:
+        raise ValueError("stimulus dimensions do not match luminance length")
+    if not np.isfinite(values).all() or np.any(values < 0) or np.any(values > 1):
+        raise ValueError("stimulus luminance must be finite and in [0, 1]")
+    if frame_ms <= 0 or repeats < 1:
+        raise ValueError("frame_ms and repeats must be positive")
+
+    raster = values.reshape(height, width)
+    receptor_luminance = sample_retina(raster, brain.uv)
+    _reset_brain(brain)
+    total = np.zeros(brain.n, dtype=np.int64)
+    elapsed_wall = 0.0
+    for _ in range(int(repeats)):
+        counts, elapsed = brain.step(receptor_luminance, float(frame_ms))
+        total += counts
+        elapsed_wall += float(elapsed)
+
+    sim_ms = float(frame_ms) * int(repeats)
+    rates = total.astype(np.float32) * (1000.0 / sim_ms)
+    projected = project_counts(rates, brain.ids, bins=bins)
+    telemetry = {
+        "neurons": int(brain.n),
+        "retinaMapped": int(len(brain.retina)),
+        "totalSpikes": int(total.sum()),
+        "activeNeurons": int(np.count_nonzero(total)),
+        "simMs": sim_ms,
+        "wallSeconds": elapsed_wall,
+        "readoutBins": int(bins),
+    }
+    return projected, telemetry
+
+
 def load_doomfly_brain(doomfly_root: Path, graph_path: Path):
     doomfly_root = Path(doomfly_root).resolve()
     graph_path = Path(graph_path).resolve()
@@ -143,27 +180,9 @@ class MaleCNSRuntime:
             raise ValueError("frame_ms and repeats must be positive")
 
     def estimate(self, stimulus: dict[str, Any]) -> dict[str, Any]:
-        width = int(stimulus.get("width", 0))
-        height = int(stimulus.get("height", 0))
-        values = np.asarray(stimulus.get("luminance", []), dtype=np.float32)
-        if width < 2 or height < 2 or values.size != width * height:
-            raise ValueError("stimulus dimensions do not match luminance length")
-        if not np.isfinite(values).all() or np.any(values < 0) or np.any(values > 1):
-            raise ValueError("stimulus luminance must be finite and in [0, 1]")
-        raster = values.reshape(height, width)
-        receptor_luminance = sample_retina(raster, self.brain.uv)
-
-        _reset_brain(self.brain)
-        total = np.zeros(self.brain.n, dtype=np.int64)
-        elapsed_wall = 0.0
-        for _ in range(self.repeats):
-            counts, elapsed = self.brain.step(receptor_luminance, self.frame_ms)
-            total += counts
-            elapsed_wall += float(elapsed)
-
-        sim_ms = self.frame_ms * self.repeats
-        rates = total.astype(np.float32) * (1000.0 / sim_ms)
-        projected = project_counts(rates, self.brain.ids, bins=self.readout.bins)
+        projected, telemetry = activity_features(
+            self.brain, stimulus, bins=self.readout.bins, frame_ms=self.frame_ms, repeats=self.repeats
+        )
         slider = self.readout.predict(projected)
         validation_mae = self.readout.validation_mae
         confidence = None if validation_mae is None else float(np.clip(1.0 - 2.0 * validation_mae, 0.0, 1.0))
@@ -172,15 +191,7 @@ class MaleCNSRuntime:
             "sliderPosition": slider,
             "confidence": confidence,
             "trace": [0.5, float(np.clip(0.5 + (slider - 0.5) * 0.55, 0, 1)), slider],
-            "telemetry": {
-                "neurons": int(self.brain.n),
-                "retinaMapped": int(len(self.brain.retina)),
-                "totalSpikes": int(total.sum()),
-                "activeNeurons": int(np.count_nonzero(total)),
-                "simMs": sim_ms,
-                "wallSeconds": elapsed_wall,
-                "readoutBins": self.readout.bins,
-            },
+            "telemetry": telemetry,
         }
 
 

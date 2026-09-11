@@ -15,7 +15,7 @@
           <h1>Flytegral</h1>
         </div>
         <div class="topbar-actions">
-          <span class="agent-badge"><span class="status-dot"></span>baseline agent</span>
+          <span class="agent-badge"><span class="status-dot"></span><span id="agent-badge-label">baseline agent</span></span>
           <span class="seed-chip">seed <strong id="seed-value">—</strong></span>
           <button id="record-demo" class="button button-secondary" type="button">Record demo</button>
           <button id="new-problem" class="button" type="button">New problem</button>
@@ -92,7 +92,7 @@
           <div class="fly-caption">
             <span class="thinking-label" id="thinking-label">watching graph</span>
             <strong>Drosophila</strong>
-            <small>baseline</small>
+            <small id="fly-agent-mode">baseline</small>
           </div>
         </section>
 
@@ -145,7 +145,7 @@
       </section>
 
       <footer class="footer-note">
-        <span>visual benchmark • exact polynomial target • transparent baseline</span>
+        <span id="footer-mode">visual benchmark • exact polynomial target • transparent baseline</span>
         <span id="recording-status"></span>
       </footer>
     </main>

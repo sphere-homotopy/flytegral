@@ -17,6 +17,8 @@ test('demo page wires graph, visible fly, slider and result metrics', async () =
   assert.match(html, /id="target-value"/);
   assert.match(html, /id="prediction-value"/);
   assert.match(html, /id="error-value"/);
+  assert.match(html, /id="agent-badge-label"/);
+  assert.match(html, /id="fly-agent-mode"/);
   assert.match(html, /type="module" src="\.\/src\/app\.js"/);
 });
 
@@ -35,6 +37,10 @@ test('app connects generated problems to canvas rendering and agent estimates', 
 
   assert.match(app, /generateProblem/);
   assert.match(app, /baselineAgent/);
+  assert.match(app, /MaleCNSBridgeAgent/);
+  assert.match(app, /agent=malecns|params.get\('agent'\)/);
+  assert.match(app, /await activeAgent\.estimate\(/);
+  assert.doesNotMatch(app, /const result = baselineAgent\.estimate/);
   assert.match(app, /drawGraph/);
   assert.match(app, /animateSlider/);
   assert.match(app, /recordDemo/);

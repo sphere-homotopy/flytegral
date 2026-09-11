@@ -1,4 +1,5 @@
 import { baselineAgent } from './agent.js';
+import { MaleCNSBridgeAgent } from './malecns.js';
 import { evaluatePolynomial, generateProblem, sliderToAnswer } from './math.js';
 
 const elements = {
@@ -22,11 +23,32 @@ const elements = {
   newProblem: document.querySelector('#new-problem'),
   recordDemoButton: document.querySelector('#record-demo'),
   recordingStatus: document.querySelector('#recording-status'),
+  agentBadgeLabel: document.querySelector('#agent-badge-label'),
+  flyAgentMode: document.querySelector('#fly-agent-mode'),
+  footerMode: document.querySelector('#footer-mode'),
 };
 
 let currentSeed = initialSeed();
 let currentProblem = null;
 let runToken = 0;
+
+const params = new URLSearchParams(window.location.search);
+const agentMode = params.get('agent') === 'malecns' ? 'malecns' : 'baseline';
+const activeAgent = agentMode === 'malecns'
+  ? new MaleCNSBridgeAgent({ endpoint: params.get('brain') ?? 'http://127.0.0.1:8777' })
+  : baselineAgent;
+
+function configureAgentLabels() {
+  if (agentMode === 'malecns') {
+    elements.agentBadgeLabel.textContent = 'MaleCNS v1.0';
+    elements.flyAgentMode.textContent = 'whole CNS + trained readout';
+    elements.footerMode.textContent = 'MaleCNS v1.0 • real connectome recurrence • trained scalar readout';
+  } else {
+    elements.agentBadgeLabel.textContent = 'baseline agent';
+    elements.flyAgentMode.textContent = 'baseline';
+    elements.footerMode.textContent = 'visual benchmark • exact polynomial target • transparent baseline';
+  }
+}
 
 function initialSeed() {
   const params = new URLSearchParams(window.location.search);
@@ -270,7 +292,7 @@ async function runProblem(seed = currentSeed) {
   try {
     const problem = generateProblem({ seed });
     currentProblem = problem;
-    const result = baselineAgent.estimate(problem, { seed: seed ^ 0x9e3779b9 });
+    const result = await activeAgent.estimate(problem, { seed: seed ^ 0x9e3779b9 });
 
     elements.seed.textContent = String(seed);
     elements.equation.textContent = formatPolynomial(problem.coefficients);
@@ -287,7 +309,9 @@ async function runProblem(seed = currentSeed) {
     elements.target.textContent = formatNumber(problem.target, 3);
     elements.prediction.textContent = formatNumber(result.value, 3);
     elements.error.textContent = formatNumber(Math.abs(result.value - problem.target), 3);
-    elements.confidence.textContent = `${Math.round(result.confidence * 100)}% conf.`;
+    elements.confidence.textContent = result.confidence == null
+      ? (result.telemetry?.totalSpikes != null ? `${result.telemetry.totalSpikes.toLocaleString()} spikes` : 'connectome')
+      : `${Math.round(result.confidence * 100)}% conf.`;
     elements.results.classList.add('revealed');
   } catch (error) {
     console.error(error);
@@ -380,4 +404,5 @@ window.addEventListener('resize', () => {
   if (currentProblem) drawGraph(currentProblem);
 });
 
+configureAgentLabels();
 runProblem(currentSeed);
