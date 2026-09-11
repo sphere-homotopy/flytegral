@@ -25,3 +25,10 @@ export function graphFeatureVector(problem, options = {}) {
   const observation = graphSampleObservation(problem, options);
   return [1, ...observation.samples.map(({ y }) => observation.width * y)];
 }
+
+export function rewardForAnswer(problem, value) {
+  const width = problem.answerRange[1] - problem.answerRange[0];
+  if (!(width > 0)) throw new RangeError('answer range must have positive width');
+  const error = Math.abs(value - problem.target);
+  return error === 0 ? 0 : -error / width;
+}
