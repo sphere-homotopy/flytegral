@@ -39,9 +39,28 @@ DOOMFLY uses the September 2026 MaleCNS v1.0 reconstruction and an approximate w
 
 Python 3.11, Git and several GB of free RAM/disk are required. The upstream edge file alone is roughly 1.1 GB.
 
+Linux/macOS:
+
 ```bash
 ./scripts/bootstrap-malecns.sh
 ```
+
+Windows PowerShell, from the Flytegral repository root:
+
+```powershell
+.\scripts\bootstrap-malecns.ps1
+```
+
+If you are not inside the repository yet, clone the working branch first:
+
+```powershell
+git clone --branch feature/flytegral-mvp https://github.com/sphere-homotopy/flytegral.git
+cd flytegral
+py -0p
+.\scripts\bootstrap-malecns.ps1
+```
+
+`py -0p` should list a Python 3.11 installation. The PowerShell bootstrap stops with a clear error if Git or Python 3.11 is missing.
 
 This creates an ignored `.vendor/doomfly` checkout, verifies the upstream MaleCNS source hashes, imports the graph, and produces:
 
@@ -53,8 +72,16 @@ This creates an ignored `.vendor/doomfly` checkout, verifies the upstream MaleCN
 
 The connectome topology and synaptic weights stay fixed. Training only fits a compact ridge-regression readout from deterministic hashed whole-brain spike-rate features to the numerical slider position.
 
+Linux/macOS:
+
 ```bash
 .venv-malecns/bin/python -m brain_runtime.train_readout --train 128 --test 64
+```
+
+Windows PowerShell:
+
+```powershell
+.\.venv-malecns\Scripts\python.exe -m brain_runtime.train_readout --train 128 --test 64
 ```
 
 The command writes ignored local artifacts:
@@ -68,8 +95,16 @@ The metrics file records the deterministic train/test seeds, readout hyperparame
 
 ### 3. Start the local neural bridge
 
+Linux/macOS:
+
 ```bash
 .venv-malecns/bin/python -m brain_runtime.server
+```
+
+Windows PowerShell:
+
+```powershell
+.\.venv-malecns\Scripts\python.exe -m brain_runtime.server
 ```
 
 It binds only to:
@@ -126,7 +161,7 @@ brain_runtime/runtime.py      DOOMFLY loader, retinal sampling, whole-brain tria
 brain_runtime/training.py     JS-compatible task/raster generation + ridge fitting
 brain_runtime/train_readout.py deterministic real-runtime readout training/evaluation
 brain_runtime/server.py       local-only MaleCNS bridge
-scripts/bootstrap-malecns.sh  pinned upstream checkout + verified MaleCNS preparation
+scripts/bootstrap-malecns.sh/.ps1 pinned upstream checkout + verified MaleCNS preparation
 scripts/evaluate.mjs          browser benchmark CLI
 scripts/smoke-demo.mjs        dependency-free browser smoke check
 tests/                        JS contracts and demo tests

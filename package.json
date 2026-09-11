@@ -7,7 +7,7 @@
     "test": "node --test tests/*.test.mjs",
     "smoke": "node scripts/smoke-demo.mjs",
     "evaluate": "node scripts/evaluate.mjs",
-    "test:brain-runtime": "python3 -m unittest brain_runtime.test_runtime brain_runtime.test_training",
+    "test:brain-runtime": "python3 -m unittest brain_runtime.test_runtime brain_runtime.test_training brain_runtime.test_windows_bootstrap",
     "malecns:train": "python3 -m brain_runtime.train_readout",
     "malecns:serve": "python3 -m brain_runtime.server"
   }
