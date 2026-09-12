@@ -1,6 +1,7 @@
 import { baselineAgent } from './agent.js';
 import { MaleCNSBridgeAgent } from './malecns.js';
 import { evaluatePolynomial, generateProblem, sliderToAnswer } from './math.js';
+import { recordingProblemSeeds } from './recording.js';
 
 const elements = {
   canvas: document.querySelector('#graph-canvas'),
@@ -375,10 +376,15 @@ async function recordDemo() {
 
     const stopped = new Promise((resolve) => recorder.addEventListener('stop', resolve, { once: true }));
     recorder.start(100);
-    elements.recordingStatus.textContent = '● recording';
 
-    await runProblem(currentSeed + 1);
-    await new Promise((resolve) => setTimeout(resolve, 900));
+    const seeds = recordingProblemSeeds(currentSeed + 1);
+    for (const [index, seed] of seeds.entries()) {
+      elements.recordingStatus.textContent = `● recording ${index + 1}/${seeds.length}`;
+      await runProblem(seed);
+      elements.newProblem.disabled = true;
+      await new Promise((resolve) => setTimeout(resolve, 700));
+    }
+
     recorder.stop();
     await stopped;
 
@@ -392,6 +398,7 @@ async function recordDemo() {
   } finally {
     stream?.getTracks().forEach((track) => track.stop());
     elements.recordDemoButton.disabled = false;
+    elements.newProblem.disabled = false;
     window.setTimeout(() => {
       if (!elements.recordingStatus.textContent.startsWith('●')) elements.recordingStatus.textContent = '';
     }, 3500);
