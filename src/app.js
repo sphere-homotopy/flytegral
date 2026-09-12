@@ -1,7 +1,7 @@
 import { baselineAgent } from './agent.js';
 import { MaleCNSBridgeAgent } from './malecns.js';
 import { evaluatePolynomial, generateProblem, sliderToAnswer } from './math.js';
-import { recordingProblemSeeds } from './recording.js';
+import { DEMO_RESULT_HOLD_MS, recordingProblemSeeds } from './recording.js';
 import { ThinkingBuzz } from './buzz.js';
 
 const elements = {
@@ -386,7 +386,7 @@ async function recordDemo() {
       elements.recordingStatus.textContent = `● recording ${index + 1}/${seeds.length}`;
       await runProblem(seed);
       elements.newProblem.disabled = true;
-      await new Promise((resolve) => setTimeout(resolve, 700));
+      await new Promise((resolve) => setTimeout(resolve, DEMO_RESULT_HOLD_MS));
     }
 
     recorder.stop();

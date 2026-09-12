@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DEMO_RECORDING_PROBLEM_COUNT, recordingProblemSeeds } from '../src/recording.js';
 import { readFile } from 'node:fs/promises';
+import { DEMO_RECORDING_PROBLEM_COUNT, DEMO_RESULT_HOLD_MS, recordingProblemSeeds } from '../src/recording.js';
 
 test('demo recording covers ten consecutive integration problems', () => {
   assert.equal(DEMO_RECORDING_PROBLEM_COUNT, 10);
@@ -9,6 +9,13 @@ test('demo recording covers ten consecutive integration problems', () => {
     260913, 260914, 260915, 260916, 260917,
     260918, 260919, 260920, 260921, 260922,
   ]);
+});
+
+test('recording adds one extra second to the previous 700 ms result hold', async () => {
+  assert.equal(DEMO_RESULT_HOLD_MS, 1700);
+  const app = await readFile(new URL('../src/app.js', import.meta.url), 'utf8');
+  assert.match(app, /DEMO_RESULT_HOLD_MS/);
+  assert.match(app, /setTimeout\(resolve, DEMO_RESULT_HOLD_MS\)/);
 });
 
 test('recordDemo iterates the recording seed sequence before stopping MediaRecorder', async () => {

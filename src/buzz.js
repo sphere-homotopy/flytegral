@@ -1,4 +1,5 @@
 export const BUZZ_AUDIO_URL = 'https://upload.wikimedia.org/wikipedia/commons/c/ca/Bombus_buzz.ogg';
+export const BUZZ_START_SECONDS = 1;
 
 export class ThinkingBuzz {
   constructor({ audioFactory = (src) => new Audio(src), volume = 0.18 } = {}) {
@@ -11,6 +12,7 @@ export class ThinkingBuzz {
 
   async start() {
     this.desiredPlaying = true;
+    this.audio.currentTime = BUZZ_START_SECONDS;
     try {
       await this.audio.play();
       return true;
@@ -23,15 +25,16 @@ export class ThinkingBuzz {
   stop() {
     this.desiredPlaying = false;
     this.audio.pause();
-    this.audio.currentTime = 0;
+    this.audio.currentTime = BUZZ_START_SECONDS;
   }
 
   async unlock() {
     if (this.desiredPlaying) return this.start();
     try {
+      this.audio.currentTime = BUZZ_START_SECONDS;
       await this.audio.play();
       this.audio.pause();
-      this.audio.currentTime = 0;
+      this.audio.currentTime = BUZZ_START_SECONDS;
       return true;
     } catch {
       return false;

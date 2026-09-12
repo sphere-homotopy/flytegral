@@ -1,4 +1,5 @@
 export const DEMO_RECORDING_PROBLEM_COUNT = 10;
+export const DEMO_RESULT_HOLD_MS = 1700;
 
 export function recordingProblemSeeds(firstSeed, count = DEMO_RECORDING_PROBLEM_COUNT) {
   if (!Number.isInteger(firstSeed)) throw new TypeError('firstSeed must be an integer');
