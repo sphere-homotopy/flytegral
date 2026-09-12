@@ -27,3 +27,24 @@ test('recordDemo iterates the recording seed sequence before stopping MediaRecor
   assert.match(app, /recordingProblemSeeds\(currentSeed \+ 1\)/);
   assert.match(app, /recording \$\{index \+ 1\}\/\$\{seeds\.length\}/);
 });
+
+test('X recording chooses H.264 with AAC-LC and never generic Opus-prone MP4', async () => {
+  const recording = await import('../src/recording.js');
+  assert.ok(Array.isArray(recording.X_UPLOAD_MIME_CANDIDATES));
+  assert.match(recording.X_UPLOAD_MIME_CANDIDATES[0], /video\/mp4/);
+  assert.match(recording.X_UPLOAD_MIME_CANDIDATES[0], /avc1/);
+  assert.match(recording.X_UPLOAD_MIME_CANDIDATES[0], /mp4a\.40\.2/);
+  assert.doesNotMatch(recording.X_UPLOAD_MIME_CANDIDATES.join('\n'), /^video\/mp4$/m);
+
+  const supported = new Set(['video/mp4;codecs=avc1,mp4a.40.2']);
+  assert.equal(
+    recording.chooseXRecordingMimeType((candidate) => supported.has(candidate)),
+    'video/mp4;codecs=avc1,mp4a.40.2',
+  );
+});
+
+test('MediaRecorder requests 128 kbps AAC audio for X-compatible output', async () => {
+  const app = await readFile(new URL('../src/app.js', import.meta.url), 'utf8');
+  assert.match(app, /audioBitsPerSecond:\s*128_000/);
+  assert.match(app, /chooseXRecordingMimeType\(MediaRecorder\.isTypeSupported\.bind\(MediaRecorder\)\)/);
+});

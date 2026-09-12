@@ -1,7 +1,7 @@
 import { baselineAgent } from './agent.js';
 import { MaleCNSBridgeAgent } from './malecns.js';
 import { evaluatePolynomial, generateProblem, sliderToAnswer } from './math.js';
-import { DEMO_RESULT_HOLD_MS, recordingProblemSeeds } from './recording.js';
+import { DEMO_RESULT_HOLD_MS, chooseXRecordingMimeType, recordingProblemSeeds } from './recording.js';
 import { ThinkingBuzz } from './buzz.js';
 
 const elements = {
@@ -332,17 +332,6 @@ function nextProblem() {
   return runProblem(currentSeed + 1);
 }
 
-function chooseRecordingMimeType() {
-  const candidates = [
-    'video/mp4;codecs=avc1',
-    'video/mp4',
-    'video/webm;codecs=vp9',
-    'video/webm;codecs=vp8',
-    'video/webm',
-  ];
-  return candidates.find((candidate) => MediaRecorder.isTypeSupported(candidate)) ?? '';
-}
-
 function downloadBlob(blob, extension) {
   const anchor = document.createElement('a');
   const url = URL.createObjectURL(blob);
@@ -371,8 +360,13 @@ async function recordDemo() {
       preferCurrentTab: true,
     });
 
-    const mimeType = chooseRecordingMimeType();
-    const recorder = new MediaRecorder(stream, mimeType ? { mimeType, videoBitsPerSecond: 6_000_000 } : undefined);
+    const mimeType = chooseXRecordingMimeType(MediaRecorder.isTypeSupported.bind(MediaRecorder));
+    if (!mimeType) throw new Error('this browser cannot record X-compatible H.264/AAC-LC MP4');
+    const recorder = new MediaRecorder(stream, {
+      mimeType,
+      videoBitsPerSecond: 6_000_000,
+      audioBitsPerSecond: 128_000,
+    });
     const chunks = [];
     recorder.addEventListener('dataavailable', (event) => {
       if (event.data.size) chunks.push(event.data);
