@@ -21,3 +21,14 @@ source lock for the authoritative notices and hashes.
 The neural dynamics, retinal projection and Flytegral scalar readout are models,
 not a reconstruction of measured membrane physiology or a claim that a biological
 fly naturally computes definite integrals.
+
+## Thinking buzz audio
+
+The fly's thinking-state buzz uses `Bombus buzz.ogg` by Wikimedia Commons user
+Mysid, recorded in Southern Finland. The copyright holder released the recording
+into the public domain. Flytegral streams the original Ogg file from Wikimedia
+Commons at runtime:
+
+`https://upload.wikimedia.org/wikipedia/commons/c/ca/Bombus_buzz.ogg`
+
+Source page: `https://commons.wikimedia.org/wiki/File:Bombus_buzz.ogg`

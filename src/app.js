@@ -2,6 +2,7 @@ import { baselineAgent } from './agent.js';
 import { MaleCNSBridgeAgent } from './malecns.js';
 import { evaluatePolynomial, generateProblem, sliderToAnswer } from './math.js';
 import { recordingProblemSeeds } from './recording.js';
+import { ThinkingBuzz } from './buzz.js';
 
 const elements = {
   canvas: document.querySelector('#graph-canvas'),
@@ -32,6 +33,7 @@ const elements = {
 let currentSeed = initialSeed();
 let currentProblem = null;
 let runToken = 0;
+const thinkingBuzz = new ThinkingBuzz();
 
 const params = new URLSearchParams(window.location.search);
 const agentMode = params.get('agent') === 'malecns' ? 'malecns' : 'baseline';
@@ -270,6 +272,8 @@ function setThinking(thinking) {
   elements.fly.classList.toggle('thinking', thinking);
   elements.flyStage.classList.toggle('thinking', thinking);
   elements.thinkingLabel.textContent = thinking ? 'estimating area…' : 'answer locked';
+  if (thinking) void thinkingBuzz.start();
+  else thinkingBuzz.stop();
 }
 
 function resetResults(problem) {
@@ -293,7 +297,6 @@ async function runProblem(seed = currentSeed) {
   try {
     const problem = generateProblem({ seed });
     currentProblem = problem;
-    const result = await activeAgent.estimate(problem, { seed: seed ^ 0x9e3779b9 });
 
     elements.seed.textContent = String(seed);
     elements.equation.textContent = formatPolynomial(problem.coefficients);
@@ -302,6 +305,7 @@ async function runProblem(seed = currentSeed) {
     drawGraph(problem);
     setThinking(true);
 
+    const result = await activeAgent.estimate(problem, { seed: seed ^ 0x9e3779b9 });
     await new Promise((resolve) => setTimeout(resolve, 360));
     await animateSlider(result.trace, problem, token);
     if (token !== runToken) return;
@@ -357,13 +361,13 @@ async function recordDemo() {
   }
 
   elements.recordDemoButton.disabled = true;
-  elements.recordingStatus.textContent = 'choose this tab to record';
+  elements.recordingStatus.textContent = 'choose this tab and enable Share tab audio';
   let stream;
 
   try {
     stream = await navigator.mediaDevices.getDisplayMedia({
       video: { frameRate: 30 },
-      audio: false,
+      audio: true,
       preferCurrentTab: true,
     });
 
@@ -404,6 +408,8 @@ async function recordDemo() {
     }, 3500);
   }
 }
+
+document.addEventListener('pointerdown', () => { void thinkingBuzz.unlock(); }, { once: true, capture: true });
 
 elements.newProblem.addEventListener('click', nextProblem);
 elements.recordDemoButton.addEventListener('click', recordDemo);
