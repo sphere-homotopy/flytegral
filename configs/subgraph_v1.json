@@ -1,0 +1,7 @@
+{
+  "min_edge_weight": 3,
+  "max_hops": 4,
+  "max_nodes": 6000,
+  "output_superclass": "descending_neuron",
+  "visual_type_prefixes": ["LC", "LPLC", "LT", "MC", "Mi", "Tm", "T4", "T5"]
+}
