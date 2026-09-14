@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
@@ -55,6 +57,75 @@ def test_load_malecns_tables_normalizes_labels_edges_and_duplicates(tmp_path):
     assert tables.edges.dtypes.astype(str).tolist() == ["int64", "int64", "int64"]
     assert tables.edges.to_dict("records") == [
         {"src": 1, "dst": 2, "weight": 7},
+        {"src": 2, "dst": 3, "weight": 4},
+    ]
+
+
+def test_generic_loader_applies_minimum_weight_after_duplicate_aggregation(tmp_path):
+    annotations = pd.DataFrame({"bodyId": [1, 2], "type": ["LC01", "DNa01"]})
+    neurotransmitters = pd.DataFrame({"bodyId": [1, 2], "predicted_nt": ["gaba", "gaba"]})
+    connectivity = pd.DataFrame(
+        {
+            "body_pre": [1, 1],
+            "body_post": [2, 2],
+            "weight": [2, 2],
+        }
+    )
+
+    tables = load_malecns_tables(
+        _write(annotations, tmp_path / "annotations.feather"),
+        _write(neurotransmitters, tmp_path / "nt.feather"),
+        _write(connectivity, tmp_path / "edges.feather"),
+        min_edge_weight=3,
+    )
+
+    assert tables.edges.to_dict("records") == [{"src": 1, "dst": 2, "weight": 4}]
+
+
+def test_aggregated_connectivity_streams_and_filters_before_pandas_materialization(tmp_path, monkeypatch):
+    annotations = pd.DataFrame(
+        {
+            "bodyId": [1, 2, 3],
+            "type": ["LC01", "Mi01", "DNa01"],
+            "superclass": ["visual_projection_neuron", "interneuron", "descending_neuron"],
+        }
+    )
+    neurotransmitters = pd.DataFrame(
+        {
+            "bodyId": [1, 2, 3],
+            "predicted_nt": ["acetylcholine", "gaba", "glutamate"],
+        }
+    )
+    connectivity = pd.DataFrame(
+        {
+            "body_pre": [1, 1, 4, 2, 3],
+            "body_post": [2, 3, 2, 3, 3],
+            "weight": [2, 5, 100, 4, 9],
+        }
+    )
+    annotation_path = _write(annotations, tmp_path / "annotations.feather")
+    nt_path = _write(neurotransmitters, tmp_path / "nt.feather")
+    connectivity_path = _write(connectivity, tmp_path / "edges.feather")
+
+    original_read_feather = pd.read_feather
+
+    def guarded_read_feather(path, *args, **kwargs):
+        if Path(path) == Path(connectivity_path):
+            raise AssertionError("aggregated connectivity must be streamed before pandas materialization")
+        return original_read_feather(path, *args, **kwargs)
+
+    monkeypatch.setattr(pd, "read_feather", guarded_read_feather)
+
+    tables = load_malecns_tables(
+        annotation_path,
+        nt_path,
+        connectivity_path,
+        min_edge_weight=3,
+        connectivity_rows_are_aggregated=True,
+    )
+
+    assert tables.edges.to_dict("records") == [
+        {"src": 1, "dst": 3, "weight": 5},
         {"src": 2, "dst": 3, "weight": 4},
     ]
 
