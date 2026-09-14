@@ -1,0 +1,124 @@
+name: Real MaleCNS training smoke
+
+on:
+  push:
+    branches:
+      - feature/fly-window-v1
+    paths:
+      - .github/workflows/real-training-smoke.yml
+  workflow_dispatch:
+
+jobs:
+  real-training-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install CPU PyTorch
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu "torch>=2.6"
+      - name: Install project
+        run: python -m pip install .
+      - name: Download reusable MaleCNS task graph
+        uses: actions/download-artifact@v4
+        with:
+          name: malecns-task-graph-v1
+          path: artifacts/graphs
+          github-token: ${{ github.token }}
+          run-id: 34867229278
+      - name: Verify real connectome gradient path
+        run: |
+          /usr/bin/time -v -o real-gradient-time.txt python - <<'PY' | tee real-gradient-smoke.json
+          import json
+          import math
+          import time
+          import torch
+          from fly_window.neural.graph import load_connectome_graph, to_sparse_recurrent
+          from fly_window.neural.policy import ConnectomePolicy
+
+          graph = load_connectome_graph(
+              "artifacts/graphs/subgraph_v1.npz",
+              "artifacts/graphs/subgraph_v1_nodes.parquet",
+          )
+          recurrent = to_sparse_recurrent(graph)
+          torch.manual_seed(20260914)
+          policy = ConnectomePolicy(graph, recurrent)
+          observation = torch.linspace(0.02, 1.0, steps=16).repeat(2, 1)
+          observation[1] = observation[1].flip(0)
+
+          started = time.perf_counter()
+          output = policy(observation)
+          motor_activity = output.activity[:, policy.output_indices]
+          loss = output.mean_action.square().mean()
+          loss.backward()
+          elapsed = time.perf_counter() - started
+
+          input_grad_norm = float(policy.input_gain.grad.norm())
+          motor_abs_mean = float(motor_activity.detach().abs().mean())
+          payload = {
+              "node_count": graph.node_count,
+              "edge_count": graph.edge_count,
+              "input_count": graph.input_count,
+              "output_count": graph.output_count,
+              "recurrent_nnz": int(recurrent._nnz()),
+              "microsteps": policy.microsteps,
+              "batch_size": 2,
+              "forward_backward_seconds": elapsed,
+              "input_gain_grad_norm": input_grad_norm,
+              "motor_activity_abs_mean": motor_abs_mean,
+              "mean_action": output.mean_action.detach().tolist(),
+          }
+          if not math.isfinite(input_grad_norm) or input_grad_norm <= 1e-12:
+              raise SystemExit(f"no usable gradient reaches visual encoder: {input_grad_norm}")
+          if not math.isfinite(motor_abs_mean) or motor_abs_mean <= 1e-12:
+              raise SystemExit(f"descending output activity is dead: {motor_abs_mean}")
+          print(json.dumps(payload, sort_keys=True))
+          PY
+      - name: Write tiny real training config
+        run: |
+          cat > /tmp/training_real_smoke.json <<'JSON'
+          {
+            "seed": 20260914,
+            "parallel_envs": 2,
+            "rollout_steps": 4,
+            "gamma": 0.99,
+            "gae_lambda": 0.95,
+            "clip_ratio": 0.2,
+            "learning_rate": 0.0003,
+            "ppo_epochs": 1,
+            "minibatch_size": 8,
+            "value_coef": 0.5,
+            "entropy_coef": 0.01,
+            "max_environment_steps": 8,
+            "checkpoint_every_steps": 8,
+            "eval_every_steps": 1000
+          }
+          JSON
+      - name: Run tiny PPO update through real MaleCNS graph
+        run: |
+          /usr/bin/time -v -o real-training-time.txt \
+            python scripts/train.py \
+              --config /tmp/training_real_smoke.json \
+              --graph-npz artifacts/graphs/subgraph_v1.npz \
+              --nodes-parquet artifacts/graphs/subgraph_v1_nodes.parquet \
+              --manifest artifacts/graphs/subgraph_v1_manifest.json \
+              --control biological \
+              --run-root artifacts/real-smoke-runs \
+            | tee real-training-smoke.json
+      - name: Preserve real training smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-malecns-training-smoke
+          path: |
+            real-gradient-smoke.json
+            real-gradient-time.txt
+            real-training-smoke.json
+            real-training-time.txt
+            artifacts/real-smoke-runs
+          if-no-files-found: ignore
+          retention-days: 30
