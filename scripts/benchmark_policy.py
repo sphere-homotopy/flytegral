@@ -5,7 +5,6 @@ import ctypes
 import json
 import math
 import os
-import resource
 import sys
 from dataclasses import asdict
 from pathlib import Path
@@ -50,6 +49,8 @@ def _peak_rss_mb() -> float:
         if not ok:
             raise OSError("GetProcessMemoryInfo failed")
         return counters.PeakWorkingSetSize / (1024 * 1024)
+
+    import resource
 
     usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     if sys.platform == "darwin":
