@@ -20,14 +20,33 @@ def _initial_frame(state) -> dict:
     }
 
 
+def _top_k_activity(activity: torch.Tensor, k: int) -> list[dict]:
+    count = min(int(k), int(activity.shape[1]))
+    magnitudes = activity.abs()
+    _, indices = torch.topk(magnitudes, k=count, dim=1, largest=True, sorted=True)
+    values = torch.gather(activity, 1, indices)
+    result: list[dict] = []
+    for row_indices, row_values in zip(indices.cpu(), values.cpu(), strict=True):
+        result.append(
+            {
+                "indices": [int(index) for index in row_indices.tolist()],
+                "values": [round(float(value), 6) for value in row_values.tolist()],
+            }
+        )
+    return result
+
+
 def rollout_many_deterministic(
     policy,
     env_config: EnvironmentConfig,
     *,
     seeds: tuple[int, ...] | list[int],
+    activity_top_k: int | None = None,
 ) -> list[dict]:
     if not seeds:
         return []
+    if activity_top_k is not None and activity_top_k <= 0:
+        raise ValueError("activity_top_k must be positive when provided")
 
     policy.eval()
     envs = [WindowExitEnv(env_config) for _ in seeds]
@@ -51,6 +70,11 @@ def rollout_many_deterministic(
             output = policy(observation_tensor)
             action_tensor = policy.action_from_latent(output.mean_action)
             actions = action_tensor.cpu().numpy()
+            brain_rows: list[dict] | None = None
+            if activity_top_k is not None:
+                if not hasattr(output, "activity"):
+                    raise ValueError("policy output must expose activity when activity_top_k is requested")
+                brain_rows = _top_k_activity(output.activity, activity_top_k)
             still_active: list[int] = []
 
             for batch_index, env_index in enumerate(active):
@@ -58,16 +82,17 @@ def rollout_many_deterministic(
                 result = envs[env_index].step(action)
                 total_rewards[env_index] += result.reward
                 done = result.terminated or result.truncated
-                frames[env_index].append(
-                    {
-                        "step": result.state.step_count,
-                        **asdict(result.state),
-                        "action": [float(action[0]), float(action[1])],
-                        "reward": float(result.reward),
-                        "collision": bool(result.collision),
-                        "done": bool(done),
-                    }
-                )
+                frame = {
+                    "step": result.state.step_count,
+                    **asdict(result.state),
+                    "action": [float(action[0]), float(action[1])],
+                    "reward": float(result.reward),
+                    "collision": bool(result.collision),
+                    "done": bool(done),
+                }
+                if brain_rows is not None:
+                    frame["brain"] = brain_rows[batch_index]
+                frames[env_index].append(frame)
                 observations[env_index] = result.observation
                 if done:
                     results[env_index] = {
@@ -85,5 +110,16 @@ def rollout_many_deterministic(
     return [result for result in results if result is not None]
 
 
-def rollout_deterministic(policy, env_config: EnvironmentConfig, *, seed: int) -> dict:
-    return rollout_many_deterministic(policy, env_config, seeds=(seed,))[0]
+def rollout_deterministic(
+    policy,
+    env_config: EnvironmentConfig,
+    *,
+    seed: int,
+    activity_top_k: int | None = None,
+) -> dict:
+    return rollout_many_deterministic(
+        policy,
+        env_config,
+        seeds=(seed,),
+        activity_top_k=activity_top_k,
+    )[0]
