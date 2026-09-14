@@ -20,7 +20,7 @@ from fly_window.neural.graph import load_connectome_graph, to_sparse_recurrent
 from fly_window.neural.policy import ConnectomePolicy
 
 
-def _peak_rss_mb() -> float:
+def _peak_rss_mb() -> float | None:
     if os.name == "nt":
         from ctypes import wintypes
 
@@ -47,7 +47,7 @@ def _peak_rss_mb() -> float:
             counters.cb,
         )
         if not ok:
-            raise OSError("GetProcessMemoryInfo failed")
+            return None
         return counters.PeakWorkingSetSize / (1024 * 1024)
 
     import resource
