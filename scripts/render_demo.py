@@ -45,8 +45,8 @@ def _draw_panel(draw, rect, trajectory, frame_index, title):
 
     wy0 = WINDOW_CENTER_Y - WINDOW_WIDTH / 2
     wy1 = WINDOW_CENTER_Y + WINDOW_WIDTH / 2
-    wx0, py1 = point(ROOM_W, wy1)
-    wx1, py0 = point(ROOM_W, wy0)
+    _, py1 = point(ROOM_W, wy1)
+    _, py0 = point(ROOM_W, wy0)
     draw.line([(x1, py1), (x1, py0)], fill=(255, 205, 35), width=10)
 
     frames = trajectory["frames"]
@@ -78,7 +78,7 @@ def _frame(before, after, frame_index, seed, trained_steps):
     left = (45, 150, 615, 492)
     right = (665, 150, 1235, 492)
     _draw_panel(draw, left, before, frame_index, "BEFORE TRAINING")
-    _draw_panel(draw, right, after, frame_index, f"AFTER {trained_steps:,} PPO STEPS")
+    _draw_panel(draw, right, after, frame_index, f"AFTER {trained_steps:,} ENV STEPS")
 
     draw.text((42, 570), "Same room. Same starting seed. Same published connectome.", font=_font(24), fill=(25, 25, 25))
     draw.text((42, 610), "Trainable: visual encoder + descending readout. Connectome topology stays fixed.", font=_font(20), fill=(55, 55, 55))
