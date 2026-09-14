@@ -32,6 +32,7 @@ jobs:
           run-id: 34867229278
       - name: Verify real connectome gradient path
         run: |
+          set -o pipefail
           /usr/bin/time -v -o real-gradient-time.txt python - <<'PY' | tee real-gradient-smoke.json
           import json
           import math
@@ -62,8 +63,8 @@ jobs:
           payload = {
               "node_count": graph.node_count,
               "edge_count": graph.edge_count,
-              "input_count": graph.input_count,
-              "output_count": graph.output_count,
+              "input_count": int(graph.input_mask.sum()),
+              "output_count": int(graph.output_mask.sum()),
               "recurrent_nnz": int(recurrent._nnz()),
               "microsteps": policy.microsteps,
               "batch_size": 2,
@@ -100,6 +101,7 @@ jobs:
           JSON
       - name: Run tiny PPO update through real MaleCNS graph
         run: |
+          set -o pipefail
           /usr/bin/time -v -o real-training-time.txt \
             python scripts/train.py \
               --config /tmp/training_real_smoke.json \
