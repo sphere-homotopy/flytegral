@@ -1,0 +1,16 @@
+{
+  "seed": 20260914,
+  "parallel_envs": 16,
+  "rollout_steps": 64,
+  "gamma": 0.99,
+  "gae_lambda": 0.95,
+  "clip_ratio": 0.2,
+  "learning_rate": 0.001,
+  "ppo_epochs": 1,
+  "minibatch_size": 32,
+  "value_coef": 0.5,
+  "entropy_coef": 0.01,
+  "max_environment_steps": 8192,
+  "checkpoint_every_steps": 4096,
+  "eval_every_steps": 1000000
+}
