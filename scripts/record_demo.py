@@ -7,7 +7,7 @@ from pathlib import Path
 import torch
 
 from fly_window.env.config import EnvironmentConfig
-from fly_window.evaluation.trajectory import rollout_deterministic
+from fly_window.evaluation.trajectory import rollout_many_deterministic
 from fly_window.neural.control import build_shuffled_control
 from fly_window.neural.graph import load_connectome_graph, to_sparse_recurrent
 from fly_window.neural.policy import ConnectomePolicy
@@ -51,10 +51,11 @@ def main() -> None:
         policy.load_state_dict(payload["policy_state"])
         checkpoint_steps = int(payload["total_environment_steps"])
 
-    trajectories = [
-        rollout_deterministic(policy, EnvironmentConfig(), seed=seed)
-        for seed in DEMO_SEEDS
-    ]
+    trajectories = rollout_many_deterministic(
+        policy,
+        EnvironmentConfig(),
+        seeds=DEMO_SEEDS,
+    )
     result = {
         "label": args.label,
         "control": args.control,
