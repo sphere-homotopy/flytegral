@@ -47,6 +47,8 @@ def main() -> None:
         args.raw_dir / ANNOTATIONS_SOURCE.name,
         args.raw_dir / NEUROTRANSMITTER_SOURCE.name,
         args.raw_dir / CONNECTIVITY_SOURCE.name,
+        min_edge_weight=config.min_edge_weight,
+        connectivity_rows_are_aggregated=True,
     )
     selected = select_task_subgraph(tables, config)
     summary = _summary(selected, config)
