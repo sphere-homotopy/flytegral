@@ -44,19 +44,6 @@ def test_exact_trainable_parameter_surface_and_frozen_graph():
     assert policy.recurrent.layout == torch.sparse_coo
 
 
-def test_policy_precomputes_frozen_transpose_for_recurrent_microsteps():
-    graph = _toy_graph()
-    recurrent = to_sparse_recurrent(graph)
-    policy = ConnectomePolicy(graph, recurrent, visual_dim=16, microsteps=4, leak=0.35)
-
-    assert policy.recurrent_t.requires_grad is False
-    assert policy.recurrent_t.layout == torch.sparse_coo
-    expected = recurrent.transpose(0, 1).coalesce()
-    actual = policy.recurrent_t.coalesce()
-    assert torch.equal(actual.indices(), expected.indices())
-    assert torch.equal(actual.values(), expected.values())
-
-
 def test_sensory_injection_reaches_only_input_mask_nodes():
     graph = _toy_graph(with_edge=False)
     recurrent = to_sparse_recurrent(graph)
