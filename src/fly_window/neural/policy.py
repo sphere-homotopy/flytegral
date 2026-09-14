@@ -58,7 +58,9 @@ class ConnectomePolicy(nn.Module):
         nn.init.xavier_uniform_(self.readout.weight)
         nn.init.zeros_(self.readout.bias)
 
-        self.register_buffer("recurrent", recurrent.coalesce().detach())
+        frozen_recurrent = recurrent.coalesce().detach()
+        self.register_buffer("recurrent", frozen_recurrent)
+        self.register_buffer("recurrent_t", frozen_recurrent.transpose(0, 1).coalesce())
         self.register_buffer("input_indices", torch.from_numpy(input_indices))
         self.register_buffer("output_indices", torch.from_numpy(output_indices))
 
@@ -78,11 +80,10 @@ class ConnectomePolicy(nn.Module):
 
         for _ in range(self.microsteps):
             recurrent_drive = torch.sparse.mm(
-                self.recurrent.transpose(0, 1), activity.transpose(0, 1)
+                self.recurrent_t, activity.transpose(0, 1)
             ).transpose(0, 1)
-            injected = torch.zeros_like(activity)
-            injected[:, self.input_indices] = sensory_drive
-            proposal = torch.tanh(recurrent_drive + injected)
+            recurrent_drive.index_add_(1, self.input_indices, sensory_drive)
+            proposal = torch.tanh(recurrent_drive)
             activity = (1.0 - self.leak) * activity + self.leak * proposal
 
         mean_action = self.readout(activity[:, self.output_indices])
