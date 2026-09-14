@@ -72,3 +72,10 @@ class RewardConfig(_FrozenConfig):
     step_penalty: float = -0.002
     success_reward: float = 5.0
     max_steps: int = Field(default=400, gt=0)
+
+
+class EnvironmentConfig(_FrozenConfig):
+    room: RoomConfig = Field(default_factory=RoomConfig)
+    dynamics: DynamicsConfig = Field(default_factory=DynamicsConfig)
+    sensor: SensorConfig = Field(default_factory=SensorConfig)
+    reward: RewardConfig = Field(default_factory=RewardConfig)
