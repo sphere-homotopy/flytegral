@@ -117,9 +117,16 @@ def test_tiny_training_run_writes_reproducible_checkpoint_and_metrics(tmp_path):
     assert manifest["seed"] == 123
     assert len(metric_lines) >= 1
     assert json.loads(metric_lines[-1])["total_environment_steps"] == 4
-    assert len(checkpoints) == 1
+    assert [path.name for path in checkpoints] == [
+        "step-000000000.pt",
+        "step-000000004.pt",
+    ]
 
-    checkpoint = torch.load(checkpoints[0], map_location="cpu", weights_only=False)
+    untrained = torch.load(checkpoints[0], map_location="cpu", weights_only=False)
+    checkpoint = torch.load(checkpoints[-1], map_location="cpu", weights_only=False)
+    assert untrained["total_environment_steps"] == 0
+    assert untrained["optimizer_state"]["state"] == {}
+
     for key in [
         "policy_state",
         "value_head_state",
