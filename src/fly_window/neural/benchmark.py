@@ -46,7 +46,9 @@ def benchmark_policy_forward(
     previous_training = policy.training
     policy.eval()
     try:
-        with torch.inference_mode():
+        # torch.inference_mode() currently conflicts with sparse COO transpose;
+        # no_grad keeps the exact inference computation while supporting sparse.mm.
+        with torch.no_grad():
             for _ in range(warmup):
                 policy(observation)
             started = perf_counter()
