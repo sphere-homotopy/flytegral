@@ -33,6 +33,14 @@ class CountingPolicy(ConstantPolicy):
         return super().__call__(observation)
 
 
+class ActivityPolicy(ConstantPolicy):
+    def __call__(self, observation):
+        batch = observation.shape[0]
+        mean_action = torch.zeros((batch, 2), dtype=torch.float32)
+        activity = torch.tensor([[0.1, -0.9, 0.4, 1.2]], dtype=torch.float32).repeat(batch, 1)
+        return SimpleNamespace(mean_action=mean_action, activity=activity)
+
+
 def test_rollout_records_initial_and_terminal_frames():
     config = EnvironmentConfig(reward=RewardConfig(max_steps=3))
     trajectory = rollout_deterministic(ConstantPolicy(), config, seed=10000)
@@ -56,3 +64,17 @@ def test_many_rollout_batches_active_demo_seeds_in_one_policy_call_per_step():
     assert all(item["steps"] == 3 for item in trajectories)
     assert policy.calls == 3
     assert policy.batch_sizes == [3, 3, 3]
+
+
+def test_rollout_optionally_records_top_k_activity_by_absolute_value():
+    config = EnvironmentConfig(reward=RewardConfig(max_steps=1))
+    trajectory = rollout_deterministic(
+        ActivityPolicy(),
+        config,
+        seed=10000,
+        activity_top_k=2,
+    )
+
+    brain = trajectory["frames"][1]["brain"]
+    assert brain["indices"] == [3, 1]
+    assert brain["values"] == [1.2, -0.9]
