@@ -26,3 +26,5 @@ jobs:
         run: python scripts/train.py --help > /dev/null
       - name: Smoke evaluation CLI
         run: python scripts/evaluate.py --help > /dev/null
+      - name: Smoke benchmark CLI
+        run: python scripts/benchmark_policy.py --help > /dev/null
