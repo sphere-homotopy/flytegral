@@ -47,11 +47,13 @@ def test_imitation_step_updates_trainable_surface_but_not_recurrent_graph():
     )
 
     before = {name: parameter.detach().clone() for name, parameter in policy.named_parameters()}
-    recurrent_before = policy.recurrent.detach().clone()
+    recurrent_before = policy.recurrent.detach().coalesce().clone()
     loss = imitation_step(policy, optimizer, observations, target_actions)
+    recurrent_after = policy.recurrent.detach().coalesce()
 
     assert loss > 0.0
-    assert torch.equal(policy.recurrent, recurrent_before)
+    assert torch.equal(recurrent_after.indices(), recurrent_before.indices())
+    assert torch.equal(recurrent_after.values(), recurrent_before.values())
     assert any(
         not torch.equal(before[name], parameter.detach())
         for name, parameter in policy.named_parameters()
