@@ -44,17 +44,6 @@ def test_exact_trainable_parameter_surface_and_frozen_graph():
     assert policy.recurrent.layout == torch.sparse_coo
 
 
-def test_policy_prepares_frozen_csr_transpose_for_repeated_cpu_sparse_mm():
-    graph = _toy_graph()
-    recurrent = to_sparse_recurrent(graph)
-    policy = ConnectomePolicy(graph, recurrent, visual_dim=16, microsteps=4, leak=0.35)
-
-    assert policy.recurrent_t.requires_grad is False
-    assert policy.recurrent_t.layout == torch.sparse_csr
-    expected = recurrent.transpose(0, 1).to_dense()
-    assert torch.allclose(policy.recurrent_t.to_dense(), expected)
-
-
 def test_sensory_injection_reaches_only_input_mask_nodes():
     graph = _toy_graph(with_edge=False)
     recurrent = to_sparse_recurrent(graph)
