@@ -255,13 +255,24 @@ def run_training(
     trainable_parameters.extend(value_head.parameters())
     optimizer = torch.optim.Adam(trainable_parameters, lr=config.learning_rate)
 
+    total_environment_steps = 0
+    _save_checkpoint(
+        path=checkpoint_dir / "step-000000000.pt",
+        policy=policy,
+        value_head=value_head,
+        optimizer=optimizer,
+        total_environment_steps=0,
+        config=config,
+        graph_manifest_hash=graph_manifest_hash,
+        git_sha=git_sha,
+    )
+
     observation_np = vector_env.reset(
         [config.seed + index for index in range(config.parallel_envs)]
     )
-    total_environment_steps = 0
     next_checkpoint = config.checkpoint_every_steps
     next_evaluation = config.eval_every_steps
-    saved_steps: set[int] = set()
+    saved_steps: set[int] = {0}
 
     while total_environment_steps < config.max_environment_steps:
         buffer = RolloutBuffer()
