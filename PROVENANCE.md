@@ -25,10 +25,36 @@ The pinned selection rule is stored in `configs/subgraph_v1.json`:
 3. connections with weight below 3 are removed;
 4. bounded forward reachability from visual seeds and bounded reverse reachability from descending outputs are computed for at most 4 hops;
 5. intermediate cells must lie in both reachable sets; visual and descending seed cells are retained explicitly;
-6. if the graph exceeds 6000 nodes, intermediates are ranked deterministically by path depth, retained incident connection weight, and body id;
+6. if the intermediate population exceeds the configured capacity, intermediates are ranked deterministically by path depth, retained incident connection weight, and body id; input/output seeds are never dropped;
 7. only real MaleCNS edges between surviving cells are retained.
 
+The configured `max_nodes=6000` therefore acts as an intermediate-node budget rather than a hard cap on the total graph size. In the verified v1 extraction the mandatory seed populations alone contain 56,093 visual inputs and 1,314 descending outputs, so the final graph necessarily exceeds 6,000 nodes.
+
 The visual type prefixes are an **engineering proxy for visually relevant populations**, not a claim that every selected cell is a photoreceptor or that the synthetic visual encoder reproduces the biological fly eye exactly.
+
+## Verified Checkpoint A
+
+A clean GitHub-hosted Ubuntu runner executed the full pipeline on 2026-09-14: source acquisition, streamed connectivity loading, thresholding, task-subgraph selection, and NPZ/Parquet export. The run completed successfully and produced the following graph summary:
+
+- visual input seeds: **56,093**
+- descending output seeds: **1,314**
+- final nodes: **57,407**
+- final directed weighted edges: **1,543,613**
+- semantic graph SHA256: `69af9e02aac7d276ea33b2529d7cdcaa83c297b17385dd9d8867d9819cd8288e`
+
+Pinned source fingerprints from that run:
+
+- annotations: `2177e246113e4cfbf1e7772ec37c6da1955ff22e8063d0b1f833101f99a9a3b2` (14,483,314 bytes)
+- neurotransmitters: `95c9289220663abeb3409f3ad9e5a7f8a53f8093f5139d15502cd08da8879621` (43,282,834 bytes)
+- connectivity weights: `e35da783d1c686b2b58b3b87cd6a403ae43bfcfba8bff28e08ef752c1a56afc1` (1,051,241,946 bytes)
+
+Serialized export fingerprints from the same run:
+
+- `subgraph_v1_nodes.parquet`: `12dda4218d522b9204a776fd63c422cbc6e6089d1f94bbaa184891d9f8311655`
+- `subgraph_v1_edges.parquet`: `fc21a73d120026c42b777712c2e62ab7cc7ea4c5c03598c0f6fa858b04868f50`
+- `subgraph_v1.npz`: `e39d1327f30b61aceb551516f11ea28f6bce46541f3c661f049dc0cabe868989`
+
+These values define the first verified real-data checkpoint. A future change to source files, selection rules, or graph semantics is expected to change one or more of these fingerprints and must be recorded as a new checkpoint rather than silently replacing this one.
 
 ## Export integrity
 
