@@ -23,8 +23,8 @@ jobs:
           python -m pip install .
       - name: Download pinned MaleCNS v1.0 files
         run: python scripts/fetch_malecns.py --output data/raw
-      - name: Build real task subgraph dry run
-        run: python scripts/build_subgraph.py --raw-dir data/raw --config configs/subgraph_v1.json --output-dir artifacts/graphs --dry-run | tee data-smoke-summary.json
+      - name: Build and export real task subgraph
+        run: python scripts/build_subgraph.py --raw-dir data/raw --config configs/subgraph_v1.json --output-dir artifacts/graphs | tee data-smoke-summary.json
       - name: Preserve provenance evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -32,5 +32,6 @@ jobs:
           name: malecns-data-smoke
           path: |
             data/raw/source-manifest.json
+            artifacts/graphs/subgraph_v1_manifest.json
             data-smoke-summary.json
           if-no-files-found: ignore
