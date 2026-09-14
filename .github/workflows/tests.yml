@@ -24,3 +24,5 @@ jobs:
         run: pytest -q
       - name: Smoke training CLI
         run: python scripts/train.py --help > /dev/null
+      - name: Smoke evaluation CLI
+        run: python scripts/evaluate.py --help > /dev/null
