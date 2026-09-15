@@ -13,12 +13,29 @@ class RecordingPolicy(nn.Module):
     def __init__(self, success: bool):
         super().__init__()
         self.weight = nn.Parameter(torch.tensor([1.25]))
+        sparse = torch.sparse_coo_tensor(
+            torch.tensor([[0, 1], [1, 0]]),
+            torch.tensor([1.0, -0.5]),
+            size=(2, 2),
+        ).coalesce()
+        self.register_buffer("recurrent", sparse)
         self.success = success
         self.eval_called = False
 
     def eval(self):
         self.eval_called = True
         return super().eval()
+
+
+def _assert_tensor_state_equal(expected: torch.Tensor, actual: torch.Tensor) -> None:
+    if expected.layout == torch.sparse_coo:
+        expected = expected.coalesce()
+        actual = actual.coalesce()
+        assert torch.equal(expected.indices(), actual.indices())
+        assert torch.equal(expected.values(), actual.values())
+        assert expected.shape == actual.shape
+    else:
+        assert torch.equal(expected, actual)
 
 
 def test_frozen_evaluation_uses_exact_held_out_seeds_without_optimizer(monkeypatch):
@@ -58,7 +75,7 @@ def test_frozen_evaluation_uses_exact_held_out_seeds_without_optimizer(monkeypat
     after = policy.state_dict()
     assert before.keys() == after.keys()
     for name in before:
-        assert torch.equal(before[name], after[name])
+        _assert_tensor_state_equal(before[name], after[name])
 
 
 def test_evaluation_rejects_any_seed_set_other_than_pinned_held_out_set():
