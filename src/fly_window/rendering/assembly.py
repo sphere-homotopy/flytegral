@@ -44,8 +44,14 @@ def build_release_assembly_plan() -> tuple[ReleaseAssemblySegment, ...]:
     )
 
 
-def validated_release_metric(evaluation: dict[str, Any]) -> HeldoutMetric:
+def validated_release_metric(
+    evaluation: dict[str, Any],
+    *,
+    require_gate: bool = True,
+) -> HeldoutMetric:
     release_gate = evaluation.get("release_gate")
-    if not isinstance(release_gate, dict) or release_gate.get("passed") is not True:
+    if require_gate and (
+        not isinstance(release_gate, dict) or release_gate.get("passed") is not True
+    ):
         raise ValueError("release gate did not pass")
     return heldout_metric(evaluation, BIOLOGICAL_MODEL_LABEL)
