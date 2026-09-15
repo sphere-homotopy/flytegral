@@ -50,6 +50,12 @@ class _ToyPolicy(nn.Module):
     def __init__(self) -> None:
         super().__init__()
         self.scale = nn.Parameter(torch.tensor(0.25))
+        sparse = torch.sparse_coo_tensor(
+            torch.tensor([[0, 1], [1, 0]]),
+            torch.tensor([0.25, -0.75]),
+            size=(2, 2),
+        ).coalesce()
+        self.register_buffer("recurrent", sparse)
 
     def forward(self, observation: torch.Tensor) -> torch.Tensor:
         first = observation[:, 0] * self.scale
@@ -59,6 +65,17 @@ class _ToyPolicy(nn.Module):
 
 def _action_from_output(output: torch.Tensor) -> torch.Tensor:
     return output
+
+
+def _assert_tensor_state_equal(expected: torch.Tensor, actual: torch.Tensor) -> None:
+    if expected.layout == torch.sparse_coo:
+        expected = expected.coalesce()
+        actual = actual.coalesce()
+        assert torch.equal(expected.indices(), actual.indices())
+        assert torch.equal(expected.values(), actual.values())
+        assert expected.shape == actual.shape
+    else:
+        assert torch.equal(expected, actual)
 
 
 def test_batched_evaluation_preserves_seed_results_and_model_state() -> None:
@@ -84,4 +101,4 @@ def test_batched_evaluation_preserves_seed_results_and_model_state() -> None:
     after = policy.state_dict()
     assert before.keys() == after.keys()
     for name in before:
-        assert torch.equal(before[name], after[name])
+        _assert_tensor_state_equal(before[name], after[name])
