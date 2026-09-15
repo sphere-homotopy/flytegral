@@ -50,3 +50,16 @@ def test_release_metric_requires_passing_gate_and_uses_100_seed_result():
 
     with pytest.raises(ValueError, match="release gate"):
         validated_release_metric(_evaluation(passed=False))
+
+
+def test_demo_release_can_report_real_metric_without_claiming_gate_passed():
+    evaluation = _evaluation(passed=False)
+    evaluation["models"][0]["successes"] = 71
+    evaluation["models"][0]["success_rate"] = 0.71
+
+    metric = validated_release_metric(evaluation, require_gate=False)
+
+    assert metric.successes == 71
+    assert metric.episode_count == 100
+    assert metric.display == "71/100 held-out successes (71%)"
+    assert evaluation["release_gate"]["passed"] is False
