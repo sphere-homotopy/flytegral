@@ -4,7 +4,11 @@ import torch
 from fly_window.env.config import EnvironmentConfig, RewardConfig
 from fly_window.neural.graph import ConnectomeGraph, to_sparse_recurrent
 from fly_window.neural.policy import ConnectomePolicy
-from fly_window.training.imitation import collect_oracle_dataset, imitation_step
+from fly_window.training.imitation import (
+    collect_oracle_dataset,
+    imitation_step,
+    run_imitation_epoch,
+)
 
 
 def _toy_graph() -> ConnectomeGraph:
@@ -58,4 +62,53 @@ def test_imitation_step_updates_trainable_surface_but_not_recurrent_graph():
         not torch.equal(before[name], parameter.detach())
         for name, parameter in policy.named_parameters()
         if parameter.requires_grad
+    )
+
+
+def test_imitation_epoch_captures_exact_half_epoch_midpoint_deterministically():
+    torch.manual_seed(17)
+    graph = _toy_graph()
+    policy = ConnectomePolicy(graph, to_sparse_recurrent(graph))
+    optimizer = torch.optim.Adam(
+        [parameter for parameter in policy.parameters() if parameter.requires_grad],
+        lr=1e-2,
+    )
+    observations = torch.rand((8, 16), dtype=torch.float32)
+    target_actions = torch.tensor(
+        [
+            [-0.9, 1.0],
+            [-0.7, 1.0],
+            [-0.4, 1.0],
+            [-0.1, 1.0],
+            [0.1, 1.0],
+            [0.4, 1.0],
+            [0.7, 1.0],
+            [0.9, 1.0],
+        ],
+        dtype=torch.float32,
+    )
+
+    result = run_imitation_epoch(
+        policy,
+        optimizer,
+        observations,
+        target_actions,
+        batch_size=2,
+        seed=20260914,
+    )
+
+    assert result.batch_count == 4
+    assert result.midpoint_batch == 2
+    assert result.midpoint_samples_seen == 4
+    assert len(result.losses) == 4
+    assert result.permutation == tuple(result.permutation)
+    assert sorted(result.permutation) == list(range(8))
+    assert result.midpoint_policy_state.keys() == policy.state_dict().keys()
+    assert all(
+        tensor.device.type == "cpu" for tensor in result.midpoint_policy_state.values()
+    )
+    assert any(
+        not torch.equal(result.midpoint_policy_state[name], value.detach().cpu())
+        for name, value in policy.state_dict().items()
+        if value.layout == torch.strided and value.dtype.is_floating_point
     )
