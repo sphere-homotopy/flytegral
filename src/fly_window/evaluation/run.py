@@ -33,6 +33,20 @@ def _snapshot_state(policy: nn.Module) -> dict[str, torch.Tensor]:
     }
 
 
+def _tensor_state_equal(expected: torch.Tensor, actual: torch.Tensor) -> bool:
+    actual = actual.detach().cpu()
+    if expected.layout != actual.layout or expected.shape != actual.shape:
+        return False
+    if expected.layout == torch.sparse_coo:
+        expected_coalesced = expected.coalesce()
+        actual_coalesced = actual.coalesce()
+        return bool(
+            torch.equal(expected_coalesced.indices(), actual_coalesced.indices())
+            and torch.equal(expected_coalesced.values(), actual_coalesced.values())
+        )
+    return bool(torch.equal(expected, actual))
+
+
 def _assert_state_unchanged(
     before: dict[str, torch.Tensor], policy: nn.Module
 ) -> None:
@@ -40,7 +54,7 @@ def _assert_state_unchanged(
     if before.keys() != after.keys():
         raise RuntimeError("evaluation changed model state keys")
     for name, expected in before.items():
-        if not torch.equal(expected, after[name].detach().cpu()):
+        if not _tensor_state_equal(expected, after[name]):
             raise RuntimeError(f"evaluation mutated model state: {name}")
 
 
