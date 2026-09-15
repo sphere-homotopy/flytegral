@@ -7,7 +7,12 @@ import numpy as np
 import torch
 from torch import nn
 
-from fly_window.evaluation.run import EvaluationSummary, HELD_OUT_SEEDS
+from fly_window.evaluation.run import (
+    EvaluationSummary,
+    HELD_OUT_SEEDS,
+    _assert_state_unchanged,
+    _snapshot_state,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,24 +25,6 @@ class EpisodeEvaluation:
 
 EnvFactory = Callable[[], Any]
 ActionFromOutput = Callable[[Any], torch.Tensor]
-
-
-def _snapshot_state(policy: nn.Module) -> dict[str, torch.Tensor]:
-    return {
-        name: tensor.detach().cpu().clone()
-        for name, tensor in policy.state_dict().items()
-    }
-
-
-def _assert_state_unchanged(
-    before: dict[str, torch.Tensor], policy: nn.Module
-) -> None:
-    after = policy.state_dict()
-    if before.keys() != after.keys():
-        raise RuntimeError("evaluation changed model state keys")
-    for name, expected in before.items():
-        if not torch.equal(expected, after[name].detach().cpu()):
-            raise RuntimeError(f"evaluation mutated model state: {name}")
 
 
 def evaluate_policy_batched(
