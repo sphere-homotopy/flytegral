@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import math
-from typing import Any
+from pathlib import Path
+from typing import Any, Mapping
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,3 +105,64 @@ def heldout_metric(evaluation: dict[str, Any], model_label: str) -> HeldoutMetri
         episode_count=episode_count,
         success_rate=success_rate,
     )
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def build_release_manifest(
+    *,
+    evaluation_path: Path,
+    output_path: Path,
+    renderer_git_sha: str,
+    source_run_ids: tuple[int, ...],
+    checkpoint_hashes: Mapping[str, str],
+    fps: int,
+    width: int,
+    height: int,
+    duration_seconds: float,
+) -> dict[str, Any]:
+    if not renderer_git_sha:
+        raise ValueError("renderer_git_sha must be non-empty")
+    if fps <= 0 or width <= 0 or height <= 0 or duration_seconds <= 0:
+        raise ValueError("media properties must be positive")
+    if not evaluation_path.is_file():
+        raise FileNotFoundError(evaluation_path)
+    if not output_path.is_file():
+        raise FileNotFoundError(output_path)
+
+    timeline = build_release_timeline(fps=fps)
+    expected_duration = timeline.duration_seconds
+    if not math.isclose(duration_seconds, expected_duration, rel_tol=0.0, abs_tol=1.0 / fps):
+        raise ValueError(
+            f"duration_seconds must match the release timeline ({expected_duration:.3f}s)"
+        )
+
+    return {
+        "source_run_ids": [int(run_id) for run_id in source_run_ids],
+        "checkpoint_hashes": dict(checkpoint_hashes),
+        "evaluation_sha256": _sha256(evaluation_path),
+        "selected_seeds": {
+            "development": [9000],
+            "heldout": [10000, 10001, 10002],
+        },
+        "frame_ranges": [
+            {
+                "kind": segment.kind,
+                "seed": segment.seed,
+                "start_frame": segment.start_frame,
+                "end_frame": segment.end_frame,
+            }
+            for segment in timeline.segments
+        ],
+        "renderer_git_sha": renderer_git_sha,
+        "output_sha256": _sha256(output_path),
+        "resolution": {"width": int(width), "height": int(height)},
+        "fps": int(fps),
+        "duration_seconds": float(duration_seconds),
+    }
