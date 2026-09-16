@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/fly-window-v1
+      - feature/fly-tweets-v1
   pull_request:
 
 jobs:
