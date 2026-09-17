@@ -65,3 +65,12 @@ def test_daily_worker_is_native_headless_and_cadence_owned():
     assert "--generation-count" not in text
     assert "collect-fly-tweet-stats.js" in text
     assert "continue-on-error: true" in text
+
+
+def test_daily_worker_reconciles_and_schedules_buffer_delivery():
+    text = (WORKFLOW_DIR / "fly-tweets-daily.yml").read_text(encoding="utf-8")
+
+    assert text.count("publish_fly_tweets_buffer.py") >= 2
+    assert "BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}" in text
+    assert "BUFFER_CHANNEL_ID: ${{ secrets.BUFFER_CHANNEL_ID }}" in text
+    assert "Buffer credentials are not configured" in text
