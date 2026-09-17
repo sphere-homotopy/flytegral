@@ -10,7 +10,9 @@ from pathlib import Path
 from fly_window.publishing.buffer_api import (
     BUFFER_GRAPHQL_ENDPOINT,
     build_create_post_request,
+    build_find_matching_posts_request,
     build_post_status_request,
+    find_matching_post,
     parse_create_post_response,
     parse_post_status_response,
 )
@@ -56,6 +58,19 @@ def _graphql(api_key: str, payload: dict[str, object]) -> dict[str, object]:
     return value
 
 
+def _apply_remote_status(row: dict[str, object], status: dict[str, str]) -> bool:
+    remote_status = status["status"].lower()
+    if remote_status == "sent":
+        row["status"] = "published"
+        row["published_at"] = status["sentAt"]
+        row["tweet_url"] = status["externalLink"]
+        row["last_error"] = ""
+        return True
+    if remote_status:
+        row["status"] = remote_status
+    return False
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Schedule generated Fly Tweets at fly-selected absolute times using Buffer."
@@ -63,14 +78,22 @@ def main() -> None:
     parser.add_argument("--rows-json", type=Path, required=True)
     parser.add_argument("--api-key", default=os.environ.get("BUFFER_API_KEY", ""))
     parser.add_argument("--channel-id", default=os.environ.get("BUFFER_CHANNEL_ID", ""))
+    parser.add_argument(
+        "--organization-id", default=os.environ.get("BUFFER_ORGANIZATION_ID", "")
+    )
     args = parser.parse_args()
 
     api_key = str(args.api_key).strip()
     channel_id = str(args.channel_id).strip()
+    organization_id = str(args.organization_id).strip()
     if not api_key:
         raise ValueError("Buffer API key is required via --api-key or BUFFER_API_KEY")
     if not channel_id:
         raise ValueError("Buffer channel id is required via --channel-id or BUFFER_CHANNEL_ID")
+    if not organization_id:
+        raise ValueError(
+            "Buffer organization id is required via --organization-id or BUFFER_ORGANIZATION_ID"
+        )
 
     rows = _load_rows(args.rows_json)
     scheduled = 0
@@ -84,15 +107,8 @@ def main() -> None:
                 status = parse_post_status_response(
                     _graphql(api_key, build_post_status_request(buffer_post_id))
                 )
-                remote_status = status["status"].lower()
-                if remote_status == "sent":
-                    row["status"] = "published"
-                    row["published_at"] = status["sentAt"]
-                    row["tweet_url"] = status["externalLink"]
-                    row["last_error"] = ""
+                if _apply_remote_status(row, status):
                     reconciled += 1
-                elif remote_status:
-                    row["status"] = remote_status
                 _write_atomic(args.rows_json, rows)
             except Exception as error:
                 row["last_error"] = str(error)
@@ -103,9 +119,32 @@ def main() -> None:
         if str(row.get("status", "") or "").strip() != "generated":
             continue
         try:
+            text = str(row.get("text", "") or "")
+            scheduled_at = str(row.get("scheduled_at", "") or "")
+            lookup = build_find_matching_posts_request(
+                organization_id=organization_id,
+                channel_id=channel_id,
+                scheduled_at=scheduled_at,
+            )
+            existing = find_matching_post(
+                _graphql(api_key, lookup),
+                text=text,
+                scheduled_at=scheduled_at,
+                channel_id=channel_id,
+            )
+            if existing is not None:
+                row["buffer_post_id"] = existing["id"]
+                _apply_remote_status(row, existing)
+                if str(row.get("status", "")) == "generated":
+                    row["status"] = existing["status"] or "scheduled"
+                row["last_error"] = ""
+                reconciled += 1
+                _write_atomic(args.rows_json, rows)
+                continue
+
             payload = build_create_post_request(
-                text=str(row.get("text", "") or ""),
-                scheduled_at=str(row.get("scheduled_at", "") or ""),
+                text=text,
+                scheduled_at=scheduled_at,
                 idempotency_key=str(row.get("idempotency_key", "") or ""),
                 channel_id=channel_id,
             )
