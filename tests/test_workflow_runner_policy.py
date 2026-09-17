@@ -30,7 +30,7 @@ def test_heavy_fly_tweets_workflows_have_no_hosted_runner_fallback():
         assert "macos-latest" not in text, filename
 
 
-def test_native_bootstrap_chain_dispatches_each_next_stage_idempotently():
+def test_native_bootstrap_chain_stops_after_durable_pretrain():
     probe = (WORKFLOW_DIR / "pc-runner-probe.yml").read_text(encoding="utf-8")
     migration = (WORKFLOW_DIR / "fly-tweets-migrate-legacy-runtime.yml").read_text(
         encoding="utf-8"
@@ -49,9 +49,8 @@ def test_native_bootstrap_chain_dispatches_each_next_stage_idempotently():
     assert "fly-tweets-initial-pretrain.yml" in migration
     assert "gh workflow run $workflow" in migration
 
-    assert "gh run list" in pretrain
-    assert "fly-tweets-daily.yml" in pretrain
-    assert "gh workflow run $workflow" in pretrain
+    assert "gh workflow run" not in pretrain
+    assert "fly-tweets-daily.yml" not in pretrain
 
 
 def test_initial_pretrain_is_bounded_and_has_no_buffer_transport_credentials():
