@@ -181,8 +181,8 @@ def generate_batch(
     batch_id: str,
     count: int = 10,
 ) -> list[GeneratedTweet]:
-    if isinstance(count, bool) or not isinstance(count, int) or count <= 0:
-        raise ValueError("count must be a positive integer")
+    if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+        raise ValueError("count must be a non-negative integer")
     return [
         generate_tweet(
             policy,
