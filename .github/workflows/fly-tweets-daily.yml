@@ -115,18 +115,20 @@ jobs:
           "FLYTWEETS_RUNTIME_STATE=$runtimeState" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "FLYTWEETS_CYCLE_RESULT=$result" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Require Buffer transport configuration
-        env:
-          BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
-          BUFFER_CHANNEL_ID: ${{ secrets.BUFFER_CHANNEL_ID }}
-          BUFFER_ORGANIZATION_ID: ${{ secrets.BUFFER_ORGANIZATION_ID }}
+      - name: Require Google Sheet transport configuration
         run: |
           $ErrorActionPreference = 'Stop'
-          $required = @($env:BUFFER_API_KEY, $env:BUFFER_CHANNEL_ID, $env:BUFFER_ORGANIZATION_ID)
-          if (@($required | Where-Object { [string]::IsNullOrWhiteSpace([string]$_) }).Count -gt 0) {
-            throw 'Buffer credentials are not configured: BUFFER_API_KEY, BUFFER_CHANNEL_ID, and BUFFER_ORGANIZATION_ID are required.'
+          $transport = Join-Path $env:FLYTEGRAL_RUNTIME 'sheet-transport.json'
+          if (-not (Test-Path $transport)) {
+            throw "Fly Tweets Sheet transport config missing: $transport"
           }
-          Write-Output 'BUFFER_TRANSPORT_CONFIGURED=true'
+          $config = Get-Content -Raw $transport | ConvertFrom-Json
+          if ([string]::IsNullOrWhiteSpace([string]$config.endpoint) -or
+              -not ([string]$config.endpoint).StartsWith('https://script.google.com/')) {
+            throw 'Fly Tweets Sheet transport endpoint is missing or invalid.'
+          }
+          "FLYTWEETS_SHEET_TRANSPORT_CONFIG=$transport" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Output 'SHEET_TRANSPORT_CONFIGURED=true'
 
       - name: Sync previous generated outbox into durable rows
         run: |
@@ -135,15 +137,21 @@ jobs:
             --rows-json $env:FLYTWEETS_ROWS `
             --outbox-jsonl $env:FLYTWEETS_OUTBOX
 
-      - name: Reconcile existing Buffer posts before stats
-        env:
-          BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
-          BUFFER_CHANNEL_ID: ${{ secrets.BUFFER_CHANNEL_ID }}
-          BUFFER_ORGANIZATION_ID: ${{ secrets.BUFFER_ORGANIZATION_ID }}
+      - name: Flush pending local batches to Google Sheet
         run: |
           $ErrorActionPreference = 'Stop'
-          & $env:FLYTWEETS_PYTHON scripts/publish_fly_tweets_buffer.py `
-            --rows-json $env:FLYTWEETS_ROWS
+          & $env:FLYTWEETS_PYTHON scripts/sync_fly_tweets_sheet.py `
+            --action ingest `
+            --rows-json $env:FLYTWEETS_ROWS `
+            --transport-config $env:FLYTWEETS_SHEET_TRANSPORT_CONFIG
+
+      - name: Sync Google Sheet state before stats
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & $env:FLYTWEETS_PYTHON scripts/sync_fly_tweets_sheet.py `
+            --action sync `
+            --rows-json $env:FLYTWEETS_ROWS `
+            --transport-config $env:FLYTWEETS_SHEET_TRANSPORT_CONFIG
 
       - name: Prepare metrics targets
         run: |
@@ -233,15 +241,13 @@ jobs:
             --rows-json $env:FLYTWEETS_ROWS `
             --outbox-jsonl $env:FLYTWEETS_OUTBOX
 
-      - name: Schedule newly generated posts in Buffer
-        env:
-          BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
-          BUFFER_CHANNEL_ID: ${{ secrets.BUFFER_CHANNEL_ID }}
-          BUFFER_ORGANIZATION_ID: ${{ secrets.BUFFER_ORGANIZATION_ID }}
+      - name: Append newly generated batch to Google Sheet
         run: |
           $ErrorActionPreference = 'Stop'
-          & $env:FLYTWEETS_PYTHON scripts/publish_fly_tweets_buffer.py `
-            --rows-json $env:FLYTWEETS_ROWS
+          & $env:FLYTWEETS_PYTHON scripts/sync_fly_tweets_sheet.py `
+            --action ingest `
+            --rows-json $env:FLYTWEETS_ROWS `
+            --transport-config $env:FLYTWEETS_SHEET_TRANSPORT_CONFIG
 
       - name: Build non-sensitive health heartbeat
         run: |
