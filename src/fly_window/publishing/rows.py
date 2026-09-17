@@ -39,9 +39,14 @@ def generated_tweet_row(
     tweet: GeneratedTweet,
     *,
     generated_at: datetime,
+    scheduled_at: datetime | None = None,
 ) -> dict[str, object]:
     if generated_at.tzinfo is None or generated_at.utcoffset() is None:
         raise ValueError("generated_at must be timezone-aware")
+    if scheduled_at is not None and (
+        scheduled_at.tzinfo is None or scheduled_at.utcoffset() is None
+    ):
+        raise ValueError("scheduled_at must be timezone-aware")
 
     provenance = generated_tweet_record(tweet)
     values: dict[str, object] = {
@@ -57,7 +62,7 @@ def generated_tweet_row(
         "token_logprobs": provenance["token_logprobs"],
         "termination_reason": tweet.termination_reason,
         "status": "generated",
-        "scheduled_at": "",
+        "scheduled_at": "" if scheduled_at is None else scheduled_at.isoformat(),
         "buffer_post_id": "",
         "tweet_url": "",
         "published_at": "",
