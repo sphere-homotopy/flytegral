@@ -1,0 +1,77 @@
+name: Fly Tweets migrate legacy runtime
+
+on:
+  push:
+    branches:
+      - feature/fly-tweets-v1
+    paths:
+      - .github/workflows/fly-tweets-migrate-legacy-runtime.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fly-tweets-migrate-legacy-runtime
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: [self-hosted, windows, x64, flytegral-pc]
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ". '{0}'"
+    steps:
+      - name: Validate, migrate, and remove legacy Fly Tweets runtime
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $legacyRoot = Join-Path $env:USERPROFILE 'fly-tweets'
+          $legacyCorpus = Join-Path $legacyRoot 'corpus\john-d-cook'
+          $legacyJsonl = Join-Path $legacyCorpus 'cook-math-tweets.jsonl'
+          $legacyManifest = Join-Path $legacyCorpus 'manifest.json'
+
+          $nativeRoot = Join-Path $env:LOCALAPPDATA 'flytegral\fly-tweets'
+          $nativeCorpus = Join-Path $nativeRoot 'corpus\john-d-cook'
+          $nativeJsonl = Join-Path $nativeCorpus 'cook-math-tweets.jsonl'
+          $nativeManifest = Join-Path $nativeCorpus 'manifest.json'
+
+          if (-not (Test-Path $legacyRoot)) {
+            Write-Output 'LEGACY_RUNTIME_ABSENT=true'
+            exit 0
+          }
+          if (-not (Test-Path $legacyJsonl)) { throw "Legacy corpus missing: $legacyJsonl" }
+          if (-not (Test-Path $legacyManifest)) { throw "Legacy manifest missing: $legacyManifest" }
+
+          $legacyRows = (Get-Content $legacyJsonl | Measure-Object -Line).Lines
+          $legacyMeta = Get-Content -Raw $legacyManifest | ConvertFrom-Json
+          if ($legacyRows -lt 1000) { throw "Legacy corpus unexpectedly small: $legacyRows rows" }
+          if ([int]$legacyMeta.rows -ne $legacyRows) {
+            throw "Legacy manifest mismatch: manifest=$($legacyMeta.rows), actual=$legacyRows"
+          }
+
+          New-Item -ItemType Directory -Force -Path $nativeCorpus | Out-Null
+          Copy-Item -Force $legacyJsonl $nativeJsonl
+          Copy-Item -Force $legacyManifest $nativeManifest
+
+          $nativeRows = (Get-Content $nativeJsonl | Measure-Object -Line).Lines
+          $nativeMeta = Get-Content -Raw $nativeManifest | ConvertFrom-Json
+          if ($nativeRows -ne $legacyRows) {
+            throw "Native corpus copy mismatch: legacy=$legacyRows, native=$nativeRows"
+          }
+          if ([int]$nativeMeta.rows -ne $nativeRows) {
+            throw "Native manifest mismatch: manifest=$($nativeMeta.rows), actual=$nativeRows"
+          }
+
+          $legacyHash = (Get-FileHash -Algorithm SHA256 $legacyJsonl).Hash
+          $nativeHash = (Get-FileHash -Algorithm SHA256 $nativeJsonl).Hash
+          if ($legacyHash -ne $nativeHash) { throw 'Corpus SHA256 mismatch after migration' }
+
+          Remove-Item -Recurse -Force $legacyRoot
+          if (Test-Path $legacyRoot) { throw "Legacy runtime still exists: $legacyRoot" }
+
+          Write-Output "MIGRATED_ROWS=$nativeRows"
+          Write-Output "CORPUS_SHA256=$nativeHash"
+          Write-Output "NATIVE_RUNTIME=$nativeRoot"
+          Write-Output 'LEGACY_RUNTIME_REMOVED=true'
