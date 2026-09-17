@@ -6,6 +6,7 @@ on:
       - feature/fly-tweets-v1
     paths:
       - .github/workflows/fly-tweets-daily.yml
+      - .github/fly-tweets-daily-kick
   schedule:
     - cron: '17 3 * * *'
   workflow_dispatch:
