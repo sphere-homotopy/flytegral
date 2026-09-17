@@ -79,27 +79,29 @@ jobs:
       - name: Real-graph text pretraining smoke
         run: |
           $ErrorActionPreference = 'Stop'
+          $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
           $smoke = Join-Path $env:FLYTEGRAL_RUNTIME 'smoke'
           New-Item -ItemType Directory -Force -Path $smoke | Out-Null
           $smokeCorpus = Join-Path $smoke 'cook-smoke.jsonl'
-          Get-Content $env:FLYTWEETS_CORPUS -TotalCount 8 | Set-Content -Encoding utf8 $smokeCorpus
+          $smokeLines = @(Get-Content $env:FLYTWEETS_CORPUS -TotalCount 8)
+          [System.IO.File]::WriteAllLines($smokeCorpus, $smokeLines, $utf8NoBom)
           $smokeConfig = Join-Path $smoke 'text_training_smoke.json'
           $json = @'
-{
-  "seed": 260917,
-  "curriculum_examples": 16,
-  "stage_a_epochs": 1,
-  "stage_b_epochs": 1,
-  "stage_c_epochs": 1,
-  "batch_size": 4,
-  "learning_rate": 0.0003,
-  "weight_decay": 0.00001,
-  "gradient_clip_norm": 1.0,
-  "max_oov_fraction": 0.35,
-  "stage_c_teacher_probability": 0.65
-}
-'@
-          [System.IO.File]::WriteAllText($smokeConfig, $json, [System.Text.UTF8Encoding]::new($false))
+          {
+            "seed": 260917,
+            "curriculum_examples": 16,
+            "stage_a_epochs": 1,
+            "stage_b_epochs": 1,
+            "stage_c_epochs": 1,
+            "batch_size": 4,
+            "learning_rate": 0.0003,
+            "weight_decay": 0.00001,
+            "gradient_clip_norm": 1.0,
+            "max_oov_fraction": 0.35,
+            "stage_c_teacher_probability": 0.65
+          }
+          '@
+          [System.IO.File]::WriteAllText($smokeConfig, $json, $utf8NoBom)
           & $env:FLYTWEETS_PYTHON scripts/train_text.py `
             --config $smokeConfig `
             --graph-npz $env:FLYTWEETS_GRAPH_NPZ `
