@@ -18,6 +18,7 @@ from fly_window.text.gate import GateConfig, evaluate_launch_gate
 from fly_window.text.policy import FlyTextPolicy
 from fly_window.text.pretraining import (
     TextTrainingConfig,
+    limit_corpus_sequences,
     load_cook_sequences,
     scheduled_sampling_loss,
     split_train_heldout,
@@ -194,6 +195,7 @@ def main() -> None:
         seed=config.seed,
         count=config.curriculum_examples,
     )
+    source_corpus_sequences: list[tuple[int, ...]] = []
     corpus_sequences: list[tuple[int, ...]] = []
     train_corpus: list[tuple[int, ...]] = []
     heldout_corpus: list[tuple[int, ...]] = []
@@ -202,13 +204,18 @@ def main() -> None:
             raise FileNotFoundError(
                 f"Cook corpus not found: {args.corpus}. Run the headless collector first."
             )
-        corpus_sequences = load_cook_sequences(
+        source_corpus_sequences = load_cook_sequences(
             args.corpus,
             vocabulary,
             max_oov_fraction=config.max_oov_fraction,
         )
-        if len(corpus_sequences) < 2:
+        if len(source_corpus_sequences) < 2:
             raise ValueError("Cook corpus must yield at least two usable training sequences")
+        corpus_sequences = limit_corpus_sequences(
+            source_corpus_sequences,
+            max_sequences=config.max_corpus_sequences,
+            seed=config.seed + 35_000,
+        )
         train_corpus, heldout_corpus = split_train_heldout(
             corpus_sequences,
             heldout_fraction=config.heldout_fraction,
@@ -251,7 +258,9 @@ def main() -> None:
 
     if not heldout_corpus:
         raise ValueError("launch gate requires a non-empty held-out Cook corpus")
-    probe_seeds = tuple(config.seed + 50_000 + index for index in range(64))
+    probe_seeds = tuple(
+        config.seed + 50_000 + index for index in range(gate_config.probe_count)
+    )
     gate_report = evaluate_launch_gate(
         policy,
         vocabulary,
@@ -308,7 +317,8 @@ def main() -> None:
         "corpus": {
             "path": str(args.corpus),
             "sha256": _sha256(args.corpus) if args.corpus.exists() else None,
-            "usable_sequences": len(corpus_sequences),
+            "source_usable_sequences": len(source_corpus_sequences),
+            "selected_sequences": len(corpus_sequences),
             "train_sequences": len(train_corpus),
             "heldout_sequences": len(heldout_corpus),
         },
@@ -342,7 +352,8 @@ def main() -> None:
                 "run_dir": str(run_dir),
                 "checkpoint": str(checkpoint_path),
                 "manifest": str(manifest_path),
-                "usable_corpus_sequences": len(corpus_sequences),
+                "source_usable_corpus_sequences": len(source_corpus_sequences),
+                "selected_corpus_sequences": len(corpus_sequences),
                 "train_corpus_sequences": len(train_corpus),
                 "heldout_corpus_sequences": len(heldout_corpus),
                 "launch_gate_passed": gate_report.passed,
