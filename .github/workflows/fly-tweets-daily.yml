@@ -95,13 +95,6 @@ jobs:
             Copy-Item (Join-Path $candidate.FullName 'checkpoint.pt') $anchor
           }
           if (-not (Test-Path $current)) { Copy-Item $anchor $current }
-          if (-not (Test-Path $cadence)) {
-            & $env:FLYTWEETS_PYTHON scripts/init_cadence.py `
-              --config configs/cadence_v1.json `
-              --graph-npz $env:FLYTWEETS_GRAPH_NPZ `
-              --nodes-parquet $env:FLYTWEETS_GRAPH_NODES `
-              --output $cadence
-          }
           $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
           if (-not (Test-Path $rows)) { [System.IO.File]::WriteAllText($rows, "[]`n", $utf8NoBom) }
           if (-not (Test-Path $outbox)) { [System.IO.File]::WriteAllText($outbox, '', $utf8NoBom) }
@@ -198,7 +191,7 @@ jobs:
             --rows-json $env:FLYTWEETS_ROWS `
             --metrics-jsonl $env:FLYTWEETS_METRICS_LATEST
 
-      - name: Run cadence-owned daily cycle
+      - name: Run daily text learning and generate exactly 10 tweets
         run: |
           $ErrorActionPreference = 'Stop'
           $requestDate = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
@@ -208,7 +201,6 @@ jobs:
             --attempt 1 `
             --current-checkpoint $env:FLYTWEETS_CURRENT_CHECKPOINT `
             --anchor-checkpoint $env:FLYTWEETS_ANCHOR_CHECKPOINT `
-            --cadence-checkpoint $env:FLYTWEETS_CADENCE_CHECKPOINT `
             --runtime-state $env:FLYTWEETS_RUNTIME_STATE `
             --runtime-config configs/fly_tweets_runtime_v1.json `
             --rows-json $env:FLYTWEETS_ROWS `
