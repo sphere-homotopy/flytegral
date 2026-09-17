@@ -47,6 +47,7 @@ class RuntimeConfig:
 
 @dataclass(frozen=True, slots=True)
 class RuntimeState:
+    started_at: datetime | None = None
     last_stats_at: datetime | None = None
     last_training_at: datetime | None = None
     last_generation_at: datetime | None = None
@@ -56,6 +57,7 @@ class RuntimeState:
 
     def __post_init__(self) -> None:
         for name in (
+            "started_at",
             "last_stats_at",
             "last_training_at",
             "last_generation_at",
@@ -113,8 +115,9 @@ def health_alerts(
     _require_aware(now)
     alerts: list[HealthAlert] = []
 
-    if state.last_training_at is not None:
-        training_age = now - state.last_training_at
+    training_baseline = state.last_training_at or state.started_at
+    if training_baseline is not None:
+        training_age = now - training_baseline
         if training_age >= timedelta(hours=config.stale_training_hours):
             alerts.append(
                 HealthAlert(
