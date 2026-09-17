@@ -96,7 +96,8 @@ def cadence_training_examples_from_rows(
     for row in rows:
         if str(row.get("training_consumed_at", "") or "").strip():
             continue
-        reward_value = row.get("reward", "")
+        cadence_reward = row.get("cadence_reward", "")
+        reward_value = cadence_reward if cadence_reward not in (None, "") else row.get("reward", "")
         if reward_value in (None, ""):
             continue
         cadence_context = row.get("cadence_context", "")
