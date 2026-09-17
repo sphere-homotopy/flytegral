@@ -1,0 +1,89 @@
+name: Buffer channel probe
+
+on:
+  push:
+    branches:
+      - feature/fly-tweets-v1
+    paths:
+      - '.github/workflows/buffer-channel-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Query configured Buffer organization and channels
+        env:
+          BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
+          BUFFER_ORGANIZATION_ID: ${{ secrets.BUFFER_ORGANIZATION_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$BUFFER_API_KEY" || { echo 'BUFFER_API_KEY_MISSING=true'; exit 1; }
+          test -n "$BUFFER_ORGANIZATION_ID" || { echo 'BUFFER_ORGANIZATION_ID_MISSING=true'; exit 1; }
+
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          endpoint = 'https://api.buffer.com'
+          api_key = os.environ['BUFFER_API_KEY']
+          org_id = os.environ['BUFFER_ORGANIZATION_ID']
+          query = '''
+          query ProbeFlyTweets($organizationId: OrganizationId!) {
+            account {
+              organizations { id name }
+            }
+            channels(input: { organizationId: $organizationId }) {
+              id
+              name
+              displayName
+              service
+              isLocked
+              isQueuePaused
+            }
+          }
+          '''
+          payload = json.dumps({
+              'query': query,
+              'variables': {'organizationId': org_id},
+          }).encode('utf-8')
+          req = urllib.request.Request(
+              endpoint,
+              data=payload,
+              headers={
+                  'Content-Type': 'application/json',
+                  'Authorization': f'Bearer {api_key}',
+              },
+              method='POST',
+          )
+          with urllib.request.urlopen(req, timeout=30) as response:
+              result = json.loads(response.read().decode('utf-8'))
+          if result.get('errors'):
+              raise SystemExit('BUFFER_GRAPHQL_ERRORS=' + json.dumps(result['errors'], ensure_ascii=False))
+
+          data = result.get('data') or {}
+          organizations = (data.get('account') or {}).get('organizations') or []
+          if not any(str(item.get('id')) == org_id for item in organizations):
+              raise SystemExit('BUFFER_ORGANIZATION_ID_NOT_AVAILABLE=true')
+
+          print('BUFFER_AUTH_OK=true')
+          print('BUFFER_ORGANIZATION_OK=true')
+          channels = data.get('channels') or []
+          print(f'BUFFER_CHANNEL_COUNT={len(channels)}')
+          for item in channels:
+              safe = {
+                  'id': item.get('id'),
+                  'name': item.get('name'),
+                  'displayName': item.get('displayName'),
+                  'service': item.get('service'),
+                  'isLocked': item.get('isLocked'),
+                  'isQueuePaused': item.get('isQueuePaused'),
+              }
+              print('BUFFER_CHANNEL=' + json.dumps(safe, ensure_ascii=False, sort_keys=True))
+          PY
