@@ -21,10 +21,15 @@ def test_daily_training_cli_exposes_durable_transaction_inputs():
         "--attempt",
         "--current-checkpoint",
         "--anchor-checkpoint",
+        "--cadence-checkpoint",
+        "--runtime-state",
+        "--runtime-config",
         "--rows-json",
         "--outbox-jsonl",
         "--run-root",
         "--reward-config",
         "--training-config",
+        "--base-seed",
     ):
         assert option in result.stdout
+    assert "--generation-count" not in result.stdout
