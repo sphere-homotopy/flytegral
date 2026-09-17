@@ -5,6 +5,7 @@ const {
   metricsCollectorLaunchOptions,
   parseCompactCount,
   parseMetricAriaLabel,
+  xProfileHrefMatchesExpectedHandle,
 } = require('../metrics-core');
 
 
@@ -62,4 +63,13 @@ test('metrics collector launch is always headless', () => {
   const options = metricsCollectorLaunchOptions();
   assert.equal(options.headless, true);
   assert.equal(options.locale, 'en-US');
+});
+
+
+test('X profile guard accepts only the expected account handle', () => {
+  assert.equal(typeof xProfileHrefMatchesExpectedHandle, 'function');
+  assert.equal(xProfileHrefMatchesExpectedHandle('/fly_topology', 'fly_topology'), true);
+  assert.equal(xProfileHrefMatchesExpectedHandle('/fly_topology/', '@fly_topology'), true);
+  assert.equal(xProfileHrefMatchesExpectedHandle('/sphere_homotopy', 'fly_topology'), false);
+  assert.equal(xProfileHrefMatchesExpectedHandle('/fly_topology/status/123', 'fly_topology'), false);
 });
