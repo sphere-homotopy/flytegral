@@ -35,6 +35,7 @@ FLY_TWEET_COLUMNS = (
     "bookmarks",
     "metrics_collected_at",
     "reward",
+    "cadence_reward",
     "training_consumed_at",
     "last_error",
 )
@@ -96,6 +97,7 @@ def generated_tweet_row(
         "bookmarks": "",
         "metrics_collected_at": "",
         "reward": "",
+        "cadence_reward": "",
         "training_consumed_at": "",
         "last_error": "",
     }
