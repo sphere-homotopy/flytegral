@@ -5,7 +5,12 @@ import torch
 
 from fly_window.neural.graph import ConnectomeGraph, to_sparse_recurrent
 from fly_window.text.policy import FlyTextPolicy
-from fly_window.text.pretraining import load_cook_sequences, teacher_forcing_loss
+from fly_window.text.pretraining import (
+    TextTrainingConfig,
+    choose_next_input,
+    load_cook_sequences,
+    teacher_forcing_loss,
+)
 from fly_window.text.vocabulary import build_v1_vocabulary
 
 
@@ -94,3 +99,84 @@ def test_teacher_forcing_loss_rejects_sequences_without_prediction_target():
         assert "at least two tokens" in str(error)
     else:
         raise AssertionError("single-token sequence must be rejected")
+
+
+def test_scheduled_sampling_transition_has_exact_endpoints():
+    assert choose_next_input(
+        teacher_token=11,
+        sampled_token=22,
+        teacher_probability=1.0,
+        draw=0.999,
+    ) == 11
+    assert choose_next_input(
+        teacher_token=11,
+        sampled_token=22,
+        teacher_probability=0.0,
+        draw=0.0,
+    ) == 22
+    assert choose_next_input(
+        teacher_token=11,
+        sampled_token=22,
+        teacher_probability=0.6,
+        draw=0.59,
+    ) == 11
+    assert choose_next_input(
+        teacher_token=11,
+        sampled_token=22,
+        teacher_probability=0.6,
+        draw=0.60,
+    ) == 22
+
+
+def test_text_training_config_round_trips_and_validates(tmp_path):
+    path = tmp_path / "training.json"
+    path.write_text(
+        json.dumps(
+            {
+                "seed": 260917,
+                "curriculum_examples": 12000,
+                "stage_a_epochs": 2,
+                "stage_b_epochs": 3,
+                "stage_c_epochs": 1,
+                "batch_size": 16,
+                "learning_rate": 0.0003,
+                "weight_decay": 0.00001,
+                "gradient_clip_norm": 1.0,
+                "max_oov_fraction": 0.35,
+                "stage_c_teacher_probability": 0.7,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = TextTrainingConfig.from_json(path)
+
+    assert config.seed == 260917
+    assert config.curriculum_examples == 12000
+    assert config.stage_b_epochs == 3
+    assert config.stage_c_teacher_probability == 0.7
+
+    path.write_text(
+        json.dumps(
+            {
+                "seed": 1,
+                "curriculum_examples": 1,
+                "stage_a_epochs": 1,
+                "stage_b_epochs": 1,
+                "stage_c_epochs": 1,
+                "batch_size": 1,
+                "learning_rate": 0.001,
+                "weight_decay": 0.0,
+                "gradient_clip_norm": 1.0,
+                "max_oov_fraction": 1.2,
+                "stage_c_teacher_probability": 0.5,
+            }
+        ),
+        encoding="utf-8",
+    )
+    try:
+        TextTrainingConfig.from_json(path)
+    except ValueError as error:
+        assert "max_oov_fraction" in str(error)
+    else:
+        raise AssertionError("invalid OOV fraction must be rejected")
