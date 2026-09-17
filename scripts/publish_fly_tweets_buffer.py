@@ -19,7 +19,7 @@ from fly_window.publishing.buffer_api import (
 
 
 def _load_rows(path: Path) -> list[dict[str, object]]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = json.loads(path.read_text(encoding="utf-8-sig"))
     if isinstance(payload, dict):
         payload = payload.get("rows")
     if not isinstance(payload, list) or any(not isinstance(row, dict) for row in payload):
