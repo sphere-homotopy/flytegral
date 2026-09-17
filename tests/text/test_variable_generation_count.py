@@ -44,3 +44,19 @@ def test_generate_batch_accepts_policy_selected_count():
     assert len(batch) == 3
     assert [tweet.tweet_index for tweet in batch] == [0, 1, 2]
     assert [tweet.seed for tweet in batch] == [700, 701, 702]
+
+
+def test_generate_batch_allows_fly_to_choose_zero_posts():
+    vocabulary = build_v1_vocabulary()
+    policy = _policy(len(vocabulary))
+
+    assert generate_batch(
+        policy,
+        vocabulary,
+        base_seed=701,
+        config=GenerationConfig(max_tokens=1),
+        checkpoint_id="ckpt-zero",
+        git_sha="abc123",
+        batch_id="batch-zero",
+        count=0,
+    ) == []
