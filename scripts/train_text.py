@@ -14,6 +14,7 @@ import torch
 
 from fly_window.neural.graph import load_connectome_graph, to_sparse_recurrent
 from fly_window.text.curriculum import generate_curriculum
+from fly_window.text.gate import GateConfig, evaluate_launch_gate
 from fly_window.text.policy import FlyTextPolicy
 from fly_window.text.pretraining import (
     TextTrainingConfig,
@@ -125,6 +126,11 @@ def main() -> None:
         default=Path("configs/text_training_v1.json"),
     )
     parser.add_argument(
+        "--gate-config",
+        type=Path,
+        default=Path("configs/text_gate_v1.json"),
+    )
+    parser.add_argument(
         "--graph-npz",
         type=Path,
         default=Path("artifacts/graphs/subgraph_v1.npz"),
@@ -158,6 +164,7 @@ def main() -> None:
     args = parser.parse_args()
 
     config = TextTrainingConfig.from_json(args.config)
+    gate_config = GateConfig.from_json(args.gate_config)
     vocabulary = build_v1_vocabulary()
     device = _resolve_device(args.device)
 
@@ -242,6 +249,27 @@ def main() -> None:
         ),
     }
 
+    if not heldout_corpus:
+        raise ValueError("launch gate requires a non-empty held-out Cook corpus")
+    probe_seeds = tuple(config.seed + 50_000 + index for index in range(64))
+    gate_report = evaluate_launch_gate(
+        policy,
+        vocabulary,
+        heldout=heldout_corpus,
+        probe_seeds=probe_seeds,
+        config=gate_config,
+    )
+    print(
+        json.dumps(
+            {
+                "event": "launch_gate",
+                **asdict(gate_report),
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+
     git_sha = _git_sha()
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     run_id = f"text-pretrain-{timestamp}-{git_sha[:8]}"
@@ -256,6 +284,8 @@ def main() -> None:
             "vocabulary": vocabulary.tokens,
             "git_sha": git_sha,
             "training_config": asdict(config),
+            "gate_config": asdict(gate_config),
+            "gate_report": asdict(gate_report),
         },
         checkpoint_path,
     )
@@ -284,6 +314,11 @@ def main() -> None:
         },
         "curriculum_sequences": len(curriculum),
         "losses": losses,
+        "launch_gate": {
+            "config": asdict(gate_config),
+            "probe_seeds": list(probe_seeds),
+            "report": asdict(gate_report),
+        },
         "checkpoint": {
             "path": checkpoint_path.name,
             "sha256": _sha256(checkpoint_path),
@@ -292,6 +327,7 @@ def main() -> None:
             "llm_in_training_path": False,
             "recurrent_connectome_trainable": bool(policy.recurrent.requires_grad),
             "vocabulary_size": len(vocabulary),
+            "public_launch_allowed": bool(gate_report.passed),
         },
     }
     manifest_path = run_dir / "manifest.json"
@@ -309,6 +345,7 @@ def main() -> None:
                 "usable_corpus_sequences": len(corpus_sequences),
                 "train_corpus_sequences": len(train_corpus),
                 "heldout_corpus_sequences": len(heldout_corpus),
+                "launch_gate_passed": gate_report.passed,
             },
             indent=2,
             sort_keys=True,
