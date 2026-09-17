@@ -1,0 +1,28 @@
+name: Fly Tweets PC runner probe
+
+on:
+  push:
+    branches:
+      - feature/fly-tweets-v1
+    paths:
+      - .github/workflows/pc-runner-probe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: [self-hosted, windows, x64, life-supervisor-pc]
+    timeout-minutes: 3
+    defaults:
+      run:
+        shell: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ". '{0}'"
+    steps:
+      - name: Probe runner
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Write-Output "COMPUTER=$env:COMPUTERNAME"
+          Write-Output "USER=$env:USERNAME"
+          Write-Output "PWD=$PWD"
+          Write-Output 'FLYTWEETS_PC_RUNNER=true'
