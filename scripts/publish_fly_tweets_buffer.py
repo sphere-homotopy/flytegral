@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -60,16 +61,16 @@ def main() -> None:
         description="Schedule generated Fly Tweets at fly-selected absolute times using Buffer."
     )
     parser.add_argument("--rows-json", type=Path, required=True)
-    parser.add_argument("--api-key", required=True)
-    parser.add_argument("--channel-id", required=True)
+    parser.add_argument("--api-key", default=os.environ.get("BUFFER_API_KEY", ""))
+    parser.add_argument("--channel-id", default=os.environ.get("BUFFER_CHANNEL_ID", ""))
     args = parser.parse_args()
 
     api_key = str(args.api_key).strip()
     channel_id = str(args.channel_id).strip()
     if not api_key:
-        raise ValueError("api-key is required")
+        raise ValueError("Buffer API key is required via --api-key or BUFFER_API_KEY")
     if not channel_id:
-        raise ValueError("channel-id is required")
+        raise ValueError("Buffer channel id is required via --channel-id or BUFFER_CHANNEL_ID")
 
     rows = _load_rows(args.rows_json)
     scheduled = 0
