@@ -1,0 +1,152 @@
+name: Fly Tweets initial pretrain
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: fly-tweets-initial-pretrain
+  cancel-in-progress: false
+
+jobs:
+  pretrain:
+    runs-on: [self-hosted, windows, x64, flytegral-pc]
+    timeout-minutes: 360
+    defaults:
+      run:
+        shell: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ". '{0}'"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/fly-tweets-v1
+
+      - name: Prepare persistent Python 3.12 environment
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:LOCALAPPDATA 'flytegral\fly-tweets'
+          $venv = Join-Path $root '.venv'
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          if (-not (Test-Path (Join-Path $venv 'Scripts\python.exe'))) {
+            py -3.12 -m venv $venv
+          }
+          $python = Join-Path $venv 'Scripts\python.exe'
+          & $python -m pip install --upgrade pip
+          & $python -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch>=2.6'
+          & $python -m pip install -e '.[dev]'
+          & $python --version
+          & $python -c "import torch; print('torch=' + torch.__version__); print('cuda=' + str(torch.cuda.is_available()))"
+          "FLYTEGRAL_RUNTIME=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "FLYTWEETS_PYTHON=$python" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Ensure MaleCNS graph artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $graphDir = Join-Path $env:FLYTEGRAL_RUNTIME 'graphs\subgraph_v1'
+          $npz = Join-Path $graphDir 'subgraph_v1.npz'
+          $nodes = Join-Path $graphDir 'subgraph_v1_nodes.parquet'
+          $manifest = Join-Path $graphDir 'subgraph_v1_manifest.json'
+          New-Item -ItemType Directory -Force -Path $graphDir | Out-Null
+          if (-not ((Test-Path $npz) -and (Test-Path $nodes) -and (Test-Path $manifest))) {
+            Get-ChildItem $graphDir -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
+            gh run download 34867229278 -R sphere-homotopy/flytegral -n malecns-task-graph-v1 -D $graphDir
+          }
+          if (-not ((Test-Path $npz) -and (Test-Path $nodes) -and (Test-Path $manifest))) {
+            throw "MaleCNS graph artifact incomplete in $graphDir"
+          }
+          "FLYTWEETS_GRAPH_NPZ=$npz" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "FLYTWEETS_GRAPH_NODES=$nodes" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "FLYTWEETS_GRAPH_MANIFEST=$manifest" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Require native Cook corpus
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $corpusDir = Join-Path $env:FLYTEGRAL_RUNTIME 'corpus\john-d-cook'
+          $corpus = Join-Path $corpusDir 'cook-math-tweets.jsonl'
+          $manifest = Join-Path $corpusDir 'manifest.json'
+          if (-not (Test-Path $corpus)) { throw "Cook corpus missing: $corpus" }
+          if (-not (Test-Path $manifest)) { throw "Cook corpus manifest missing: $manifest" }
+          $rowCount = (Get-Content $corpus | Measure-Object -Line).Lines
+          if ($rowCount -lt 8) { throw "Cook corpus too small: $rowCount rows" }
+          Write-Output "COOK_CORPUS_ROWS=$rowCount"
+          Get-Content $manifest
+          "FLYTWEETS_CORPUS=$corpus" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Real-graph text pretraining smoke
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $smoke = Join-Path $env:FLYTEGRAL_RUNTIME 'smoke'
+          New-Item -ItemType Directory -Force -Path $smoke | Out-Null
+          $smokeCorpus = Join-Path $smoke 'cook-smoke.jsonl'
+          Get-Content $env:FLYTWEETS_CORPUS -TotalCount 8 | Set-Content -Encoding utf8 $smokeCorpus
+          $smokeConfig = Join-Path $smoke 'text_training_smoke.json'
+          $json = @'
+{
+  "seed": 260917,
+  "curriculum_examples": 16,
+  "stage_a_epochs": 1,
+  "stage_b_epochs": 1,
+  "stage_c_epochs": 1,
+  "batch_size": 4,
+  "learning_rate": 0.0003,
+  "weight_decay": 0.00001,
+  "gradient_clip_norm": 1.0,
+  "max_oov_fraction": 0.35,
+  "stage_c_teacher_probability": 0.65
+}
+'@
+          [System.IO.File]::WriteAllText($smokeConfig, $json, [System.Text.UTF8Encoding]::new($false))
+          & $env:FLYTWEETS_PYTHON scripts/train_text.py `
+            --config $smokeConfig `
+            --graph-npz $env:FLYTWEETS_GRAPH_NPZ `
+            --nodes-parquet $env:FLYTWEETS_GRAPH_NODES `
+            --graph-manifest $env:FLYTWEETS_GRAPH_MANIFEST `
+            --corpus $smokeCorpus `
+            --run-root (Join-Path $smoke 'runs') `
+            --device cpu
+
+      - name: Full initial Fly Tweets pretraining
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $runRoot = Join-Path $env:FLYTEGRAL_RUNTIME 'text-runs'
+          New-Item -ItemType Directory -Force -Path $runRoot | Out-Null
+          & $env:FLYTWEETS_PYTHON scripts/train_text.py `
+            --config configs/text_training_v1.json `
+            --graph-npz $env:FLYTWEETS_GRAPH_NPZ `
+            --nodes-parquet $env:FLYTWEETS_GRAPH_NODES `
+            --graph-manifest $env:FLYTWEETS_GRAPH_MANIFEST `
+            --corpus $env:FLYTWEETS_CORPUS `
+            --run-root $runRoot `
+            --device cpu
+          $latest = Get-ChildItem $runRoot -Directory | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+          if ($null -eq $latest) { throw 'No text pretraining run directory was created' }
+          $manifest = Join-Path $latest.FullName 'manifest.json'
+          $checkpoint = Join-Path $latest.FullName 'checkpoint.pt'
+          if (-not (Test-Path $manifest)) { throw "Training manifest missing: $manifest" }
+          if (-not (Test-Path $checkpoint)) { throw "Training checkpoint missing: $checkpoint" }
+          Get-Content $manifest
+          "FLYTWEETS_RUN_DIR=$($latest.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "FLYTWEETS_RUN_ID=$($latest.Name)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Stage durable training artifact
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stage = Join-Path $env:RUNNER_TEMP 'fly-tweets-initial-pretrain'
+          if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item (Join-Path $env:FLYTWEETS_RUN_DIR 'manifest.json') $stage
+          Copy-Item (Join-Path $env:FLYTWEETS_RUN_DIR 'checkpoint.pt') $stage
+          "FLYTWEETS_ARTIFACT_STAGE=$stage" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Output "ARTIFACT_RUN_ID=$env:FLYTWEETS_RUN_ID"
+
+      - name: Upload initial Fly Tweets checkpoint
+        uses: actions/upload-artifact@v4
+        with:
+          name: fly-tweets-initial-pretrain
+          path: ${{ env.FLYTWEETS_ARTIFACT_STAGE }}
+          if-no-files-found: error
+          retention-days: 30
