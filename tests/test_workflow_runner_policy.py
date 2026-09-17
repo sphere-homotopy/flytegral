@@ -81,14 +81,17 @@ def test_daily_worker_is_native_headless_and_cadence_owned():
     assert "continue-on-error: true" in text
 
 
-def test_daily_worker_reconciles_and_schedules_buffer_delivery():
+def test_daily_worker_routes_publishing_through_google_sheet_and_apps_script():
     text = (WORKFLOW_DIR / "fly-tweets-daily.yml").read_text(encoding="utf-8")
 
-    assert text.count("publish_fly_tweets_buffer.py") >= 2
-    assert "BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}" in text
-    assert "BUFFER_CHANNEL_ID: ${{ secrets.BUFFER_CHANNEL_ID }}" in text
-    assert "BUFFER_ORGANIZATION_ID: ${{ secrets.BUFFER_ORGANIZATION_ID }}" in text
-    assert "Buffer credentials are not configured" in text
+    assert text.count("sync_fly_tweets_sheet.py") >= 3
+    assert "--action ingest" in text
+    assert "--action sync" in text
+    assert "sheet-transport.json" in text
+    assert "publish_fly_tweets_buffer.py" not in text
+    assert "BUFFER_API_KEY" not in text
+    assert "BUFFER_CHANNEL_ID" not in text
+    assert "BUFFER_ORGANIZATION_ID" not in text
 
 
 def test_daily_worker_exports_non_sensitive_health_heartbeat():
