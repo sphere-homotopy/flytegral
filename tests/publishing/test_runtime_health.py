@@ -37,6 +37,7 @@ def test_daily_generation_extends_existing_queue_by_one_day():
 def test_health_alerts_cover_stale_training_and_low_reserve_independently():
     now = _now()
     state = RuntimeState(
+        started_at=now - timedelta(days=10),
         last_training_at=now - timedelta(days=8),
         last_generation_at=now - timedelta(hours=3),
         queue_horizon_at=now + timedelta(hours=10),
@@ -50,9 +51,25 @@ def test_health_alerts_cover_stale_training_and_low_reserve_independently():
     assert next(alert for alert in alerts if alert.code == "queue_low").urgent is True
 
 
+def test_never_trained_runtime_alerts_after_one_week():
+    now = _now()
+    state = RuntimeState(
+        started_at=now - timedelta(days=8),
+        last_training_at=None,
+        queue_horizon_at=now + timedelta(days=2),
+        current_checkpoint="pretrain-a",
+    )
+
+    alerts = health_alerts(state, now=now, config=RuntimeConfig())
+
+    stale = next(alert for alert in alerts if alert.code == "training_stale")
+    assert "No successful Fly Tweets retraining" in stale.message
+
+
 def test_missing_recent_stats_does_not_create_a_blocking_health_state():
     now = _now()
     state = RuntimeState(
+        started_at=now - timedelta(days=1),
         last_stats_at=None,
         last_training_at=now - timedelta(days=1),
         last_generation_at=now,
