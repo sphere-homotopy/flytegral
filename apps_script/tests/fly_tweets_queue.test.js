@@ -6,72 +6,46 @@ const {
   scheduleFlyTweetSlots,
 } = require('../FlyTweetsQueue');
 
-const BASELINES = [
-  '2026-09-17T07:30:00.000Z',
-  '2026-09-17T09:00:00.000Z',
-  '2026-09-17T10:30:00.000Z',
-  '2026-09-17T12:00:00.000Z',
-  '2026-09-17T13:30:00.000Z',
-  '2026-09-17T15:00:00.000Z',
-  '2026-09-17T16:30:00.000Z',
-  '2026-09-17T18:00:00.000Z',
-  '2026-09-17T19:30:00.000Z',
-  '2026-09-17T21:00:00.000Z',
+const FLY_SELECTED_SLOTS = [
+  '2026-09-17T08:17:00.000Z',
+  '2026-09-17T12:41:00.000Z',
+  '2026-09-17T19:03:00.000Z',
 ];
 
 
-test('schedule is deterministic for a seed and returns ten sorted slots', () => {
-  const first = scheduleFlyTweetSlots(BASELINES, 260917);
-  const second = scheduleFlyTweetSlots(BASELINES, 260917);
+test('transport preserves fly-selected absolute publish times exactly', () => {
+  const scheduled = scheduleFlyTweetSlots(FLY_SELECTED_SLOTS, 260917);
 
-  assert.deepEqual(first, second);
-  assert.equal(first.length, 10);
-  assert.deepEqual([...first].sort(), first);
+  assert.deepEqual(scheduled, FLY_SELECTED_SLOTS);
 });
 
 
-test('all scheduled slots stay within the 45 minute baseline clip', () => {
-  const slots = scheduleFlyTweetSlots(BASELINES, 1234, {
-    sigmaMinutes: 22,
-    clipMinutes: 45,
-    minGapMinutes: 35,
-  });
-
-  for (let i = 0; i < slots.length; i += 1) {
-    const deltaMinutes = Math.abs(
-      (Date.parse(slots[i]) - Date.parse(BASELINES[i])) / 60_000,
-    );
-    assert.ok(deltaMinutes <= 45 + 1e-9, `slot ${i} moved ${deltaMinutes} minutes`);
-  }
+test('transport accepts a variable number of fly-selected slots', () => {
+  assert.equal(scheduleFlyTweetSlots(FLY_SELECTED_SLOTS.slice(0, 1), 1).length, 1);
+  assert.equal(scheduleFlyTweetSlots(FLY_SELECTED_SLOTS, 1).length, 3);
 });
 
 
-test('scheduled slots preserve at least a 35 minute gap', () => {
-  const slots = scheduleFlyTweetSlots(BASELINES, 987654);
-
-  for (let i = 1; i < slots.length; i += 1) {
-    const gapMinutes = (Date.parse(slots[i]) - Date.parse(slots[i - 1])) / 60_000;
-    assert.ok(gapMinutes >= 35, `gap ${i - 1}->${i} is ${gapMinutes} minutes`);
-  }
-});
-
-
-test('different seeds change at least one slot', () => {
-  const first = scheduleFlyTweetSlots(BASELINES, 1);
-  const second = scheduleFlyTweetSlots(BASELINES, 2);
-  assert.notDeepEqual(first, second);
-});
-
-
-test('idempotency key is batch plus tweet index', () => {
-  assert.equal(flyTweetsIdempotencyKey('batch-a', 0), 'batch-a:0');
-  assert.equal(flyTweetsIdempotencyKey('batch-a', 9), 'batch-a:9');
-});
-
-
-test('scheduler rejects anything other than ten baselines', () => {
+test('transport safety guard rejects unsorted or too-close fly-selected slots', () => {
   assert.throws(
-    () => scheduleFlyTweetSlots(BASELINES.slice(0, 9), 1),
-    /exactly 10/,
+    () => scheduleFlyTweetSlots([
+      '2026-09-17T10:00:00.000Z',
+      '2026-09-17T09:00:00.000Z',
+    ], 1),
+    /strictly increasing/,
   );
+  assert.throws(
+    () => scheduleFlyTweetSlots([
+      '2026-09-17T10:00:00.000Z',
+      '2026-09-17T10:10:00.000Z',
+    ], 1, { minGapMinutes: 20 }),
+    /minimum gap/,
+  );
+});
+
+
+test('idempotency key supports variable batch sizes', () => {
+  assert.equal(flyTweetsIdempotencyKey('batch-a', 0), 'batch-a:0');
+  assert.equal(flyTweetsIdempotencyKey('batch-a', 42), 'batch-a:42');
+  assert.throws(() => flyTweetsIdempotencyKey('batch-a', -1), /non-negative/);
 });
