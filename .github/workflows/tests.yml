@@ -25,6 +25,12 @@ jobs:
         run: python -m pip install -e '.[dev]'
       - name: Run tests
         run: pytest -q
+      - name: Run collector tests
+        shell: bash
+        run: |
+          if compgen -G "collector/tests/*.test.js" > /dev/null; then
+            node --test collector/tests/*.test.js
+          fi
       - name: Smoke training CLI
         run: python scripts/train.py --help > /dev/null
       - name: Smoke evaluation CLI
