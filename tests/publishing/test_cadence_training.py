@@ -97,3 +97,22 @@ def test_engagement_update_changes_cadence_head_but_not_recurrent_connectome():
         if value.layout != torch.sparse_coo and not torch.equal(value, state_before[name])
     ]
     assert any(name.startswith("action_readout") or name.startswith("input_") for name in changed)
+
+
+def test_cadence_reward_overrides_text_reward_for_backpressure_penalty():
+    rows = [
+        {
+            "idempotency_key": "batch-missed:0",
+            "cadence_context": json.dumps([0.2, 0.3, 0.4, 0.5]),
+            "cadence_action": 2,
+            "reward": "",
+            "cadence_reward": -1.0,
+            "training_consumed_at": "",
+        }
+    ]
+
+    examples = cadence_training_examples_from_rows(rows, action_count=4)
+
+    assert len(examples) == 1
+    assert examples[0].idempotency_key == "batch-missed:0"
+    assert examples[0].reward == -1.0
