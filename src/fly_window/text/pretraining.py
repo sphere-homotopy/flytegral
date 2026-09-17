@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import random
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -172,6 +173,56 @@ def teacher_forcing_loss(
             output = policy.step(token_ids, state)
             losses.append(F.cross_entropy(output.logits, target))
             state = output.state
+
+    if not losses:
+        raise ValueError("sequences did not contain any prediction targets")
+    return torch.stack(losses).mean()
+
+
+def scheduled_sampling_loss(
+    policy: FlyTextPolicy,
+    sequences: Sequence[Sequence[int]],
+    *,
+    teacher_probability: float,
+    seed: int,
+) -> torch.Tensor:
+    """Next-token loss with deterministic scheduled sampling of the fly's own prefixes."""
+    if not sequences:
+        raise ValueError("sequences must not be empty")
+    if not 0.0 <= teacher_probability <= 1.0:
+        raise ValueError("teacher_probability must lie in [0, 1]")
+
+    chooser = random.Random(seed)
+    sampler = torch.Generator(device="cpu")
+    sampler.manual_seed(int(seed))
+    device = policy.input_gain.device
+    losses: list[torch.Tensor] = []
+
+    for sequence in sequences:
+        if len(sequence) < 2:
+            raise ValueError("each training sequence must contain at least two tokens")
+
+        state = policy.initial_state(batch_size=1)
+        input_token = int(sequence[0])
+        targets = sequence[1:]
+        for target_index, teacher_token in enumerate(targets):
+            token_ids = torch.tensor([input_token], dtype=torch.long, device=device)
+            target = torch.tensor([int(teacher_token)], dtype=torch.long, device=device)
+            output = policy.step(token_ids, state)
+            losses.append(F.cross_entropy(output.logits, target))
+            state = output.state
+
+            if target_index + 1 < len(targets):
+                probabilities = torch.softmax(output.logits.detach(), dim=-1).cpu()[0]
+                sampled_token = int(
+                    torch.multinomial(probabilities, 1, generator=sampler).item()
+                )
+                input_token = choose_next_input(
+                    teacher_token=int(teacher_token),
+                    sampled_token=sampled_token,
+                    teacher_probability=teacher_probability,
+                    draw=chooser.random(),
+                )
 
     if not losses:
         raise ValueError("sequences did not contain any prediction targets")
