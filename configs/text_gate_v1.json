@@ -5,6 +5,8 @@
   "min_non_degenerate_rate": 0.95,
   "min_median_chars": 20,
   "max_median_chars": 220,
-  "probe_max_tokens": 96,
-  "temperature": 0.9
+  "probe_max_tokens": 64,
+  "temperature": 0.9,
+  "probe_count": 8,
+  "replay_probe_count": 2
 }
