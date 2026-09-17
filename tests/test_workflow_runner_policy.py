@@ -73,7 +73,8 @@ def test_daily_worker_is_native_headless_and_cadence_owned():
     assert EXPECTED_SELF_HOSTED_RUNNER in text
     assert "-NoProfile -NonInteractive" in text
     assert "run_daily_text_training.py" in text
-    assert "--cadence-checkpoint" in text
+    assert "--cadence-checkpoint" not in text
+    assert "--cadence-training-config" not in text
     assert "--runtime-state" in text
     assert "--runtime-config" in text
     assert "--generation-count" not in text
