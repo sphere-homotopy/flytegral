@@ -223,14 +223,16 @@ async function main() {
 
   const context = await chromium.launchPersistentContext(profileDir(), collectorLaunchOptions());
   const page = context.pages()[0] || await context.newPage();
+  let result = persistCorpus(rowsByUrl, accounts, dir);
   try {
     await assertLoggedIn(page);
     for (const account of accounts) {
       const before = rowsByUrl.size;
       await collectAccount(page, account, rowsByUrl);
+      result = persistCorpus(rowsByUrl, accounts, dir);
       console.log(`@${account}: ${rowsByUrl.size - before} new rows (${rowsByUrl.size} total)`);
+      console.log(JSON.stringify({ checkpoint: account, ...result }, null, 2));
     }
-    const result = persistCorpus(rowsByUrl, accounts, dir);
     console.log(JSON.stringify(result, null, 2));
   } finally {
     await context.close();
