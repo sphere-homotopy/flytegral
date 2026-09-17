@@ -8,7 +8,7 @@ from fly_window.publishing.metrics_merge import merge_collected_metrics
 
 
 def _load_rows(path: Path) -> list[dict[str, object]]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = json.loads(path.read_text(encoding="utf-8-sig"))
     if isinstance(payload, dict):
         payload = payload.get("rows")
     if not isinstance(payload, list) or any(not isinstance(row, dict) for row in payload):
@@ -20,7 +20,7 @@ def _load_jsonl(path: Path) -> list[dict[str, object]]:
     result: list[dict[str, object]] = []
     if not path.exists():
         return result
-    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+    for line_number, line in enumerate(path.read_text(encoding="utf-8-sig").splitlines(), start=1):
         if not line.strip():
             continue
         value = json.loads(line)
