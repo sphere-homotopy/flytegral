@@ -6,7 +6,16 @@ from datetime import datetime
 
 import torch
 
-from fly_window.publishing.cadence import FlyCadencePolicy, sample_publish_times
+from fly_window.publishing.cadence import (
+    FlyCadencePolicy,
+    sample_publish_decisions,
+)
+from fly_window.publishing.cadence_training import (
+    CadenceTrainingConfig,
+    CadenceUpdateStats,
+    apply_cadence_policy_update,
+    cadence_training_examples_from_rows,
+)
 from fly_window.publishing.rows import generated_tweet_row
 from fly_window.text.daily_training import (
     DailyTrainingConfig,
@@ -22,10 +31,12 @@ from fly_window.text.vocabulary import FlyVocabulary
 @dataclass(frozen=True, slots=True)
 class ScheduledDailyCycleResult:
     training_applied: bool
+    cadence_training_applied: bool
     checkpoint_id: str
     batch_id: str
     consumed_keys: tuple[str, ...]
     update_stats: DailyUpdateStats | None
+    cadence_update_stats: CadenceUpdateStats | None
     publish_times: tuple[datetime, ...]
     generated_rows: tuple[dict[str, object], ...]
 
@@ -36,7 +47,7 @@ CheckpointWriter = Callable[
 RowsAppender = Callable[[list[dict[str, object]]], None]
 
 
-def _snapshot_state(policy: FlyTextPolicy) -> dict[str, torch.Tensor]:
+def _snapshot_state(policy: torch.nn.Module) -> dict[str, torch.Tensor]:
     return {name: tensor.detach().clone() for name, tensor in policy.state_dict().items()}
 
 
@@ -65,17 +76,11 @@ def run_scheduled_daily_cycle(
     now: datetime,
     write_checkpoint: CheckpointWriter,
     append_rows: RowsAppender,
+    cadence_training_config: CadenceTrainingConfig | None = None,
     cadence_temperature: float = 1.0,
     max_posts_per_24h: int = 30,
 ) -> ScheduledDailyCycleResult:
-    """Run one production Fly Tweets cycle with cadence owned by MaleCNS.
-
-    Settled rewards are optional. When they exist, the text policy is updated and a
-    new immutable checkpoint is written before the newly scheduled queue rows become
-    visible. When they do not exist, training is skipped but cadence inference and
-    text generation still run from the current checkpoint. Queue append failure rolls
-    back any text update and leaves source rows unconsumed.
-    """
+    """Run one production cycle where engagement updates text and cadence policies."""
     current_checkpoint = str(current_checkpoint_id).strip()
     next_checkpoint = str(next_checkpoint_id).strip()
     batch = str(batch_id).strip()
@@ -95,6 +100,10 @@ def run_scheduled_daily_cycle(
         raise ValueError("window_end must be later than window_start")
 
     examples = training_examples_from_rows(rows, vocabulary=vocabulary)
+    cadence_examples = cadence_training_examples_from_rows(
+        rows,
+        action_count=cadence_policy.action_count,
+    )
     consumed_keys = tuple(example.idempotency_key for example in examples)
     consumed_set = set(consumed_keys)
     target_rows = [
@@ -107,9 +116,13 @@ def run_scheduled_daily_cycle(
         raise ValueError("training rows do not map one-to-one to unconsumed examples")
 
     training_applied = bool(examples)
-    active_checkpoint = next_checkpoint if training_applied else current_checkpoint
-    snapshot = _snapshot_state(policy) if training_applied else None
+    cadence_training_applied = bool(cadence_examples) and cadence_training_config is not None
+    any_training_applied = training_applied or cadence_training_applied
+    active_checkpoint = next_checkpoint if any_training_applied else current_checkpoint
+    text_snapshot = _snapshot_state(policy) if training_applied else None
+    cadence_snapshot = _snapshot_state(cadence_policy) if cadence_training_applied else None
     update_stats: DailyUpdateStats | None = None
+    cadence_update_stats: CadenceUpdateStats | None = None
 
     try:
         if training_applied:
@@ -120,19 +133,50 @@ def run_scheduled_daily_cycle(
                 examples=examples,
                 config=training_config,
             )
+        if cadence_training_applied:
+            assert cadence_training_config is not None
+            cadence_update_stats = apply_cadence_policy_update(
+                cadence_policy,
+                examples=cadence_examples,
+                config=cadence_training_config,
+            )
+
+        if any_training_applied:
             checkpoint_manifest: dict[str, object] = {
                 "schema_version": 1,
                 "checkpoint_id": next_checkpoint,
                 "parent_checkpoint_id": current_checkpoint,
                 "batch_id": batch,
                 "git_sha": sha,
-                "example_count": update_stats.example_count,
-                "update_steps": update_stats.update_steps,
-                "losses": list(update_stats.losses),
-                "gradient_norms": list(update_stats.gradient_norms),
-                "final_policy_loss": update_stats.final_policy_loss,
-                "final_entropy": update_stats.final_entropy,
-                "final_anchor_kl": update_stats.final_anchor_kl,
+                "example_count": 0 if update_stats is None else update_stats.example_count,
+                "update_steps": 0 if update_stats is None else update_stats.update_steps,
+                "losses": [] if update_stats is None else list(update_stats.losses),
+                "gradient_norms": [] if update_stats is None else list(update_stats.gradient_norms),
+                "final_policy_loss": None if update_stats is None else update_stats.final_policy_loss,
+                "final_entropy": None if update_stats is None else update_stats.final_entropy,
+                "final_anchor_kl": None if update_stats is None else update_stats.final_anchor_kl,
+                "cadence_example_count": (
+                    0 if cadence_update_stats is None else cadence_update_stats.example_count
+                ),
+                "cadence_update_steps": (
+                    0 if cadence_update_stats is None else cadence_update_stats.update_steps
+                ),
+                "cadence_losses": (
+                    [] if cadence_update_stats is None else list(cadence_update_stats.losses)
+                ),
+                "cadence_gradient_norms": (
+                    []
+                    if cadence_update_stats is None
+                    else list(cadence_update_stats.gradient_norms)
+                ),
+                "cadence_final_policy_loss": (
+                    None
+                    if cadence_update_stats is None
+                    else cadence_update_stats.final_policy_loss
+                ),
+                "cadence_final_entropy": (
+                    None if cadence_update_stats is None else cadence_update_stats.final_entropy
+                ),
                 "consumed_keys": list(consumed_keys),
                 "completed_at": now.isoformat(),
                 "llm_in_training_path": False,
@@ -148,7 +192,7 @@ def run_scheduled_daily_cycle(
                 checkpoint_manifest,
             )
 
-        publish_times = sample_publish_times(
+        decisions = sample_publish_decisions(
             cadence_policy,
             start=window_start,
             end=window_end,
@@ -156,6 +200,7 @@ def run_scheduled_daily_cycle(
             temperature=cadence_temperature,
             max_posts_per_24h=max_posts_per_24h,
         )
+        publish_times = tuple(decision.publish_at for decision in decisions)
         generated = generate_batch(
             policy,
             vocabulary,
@@ -164,15 +209,17 @@ def run_scheduled_daily_cycle(
             checkpoint_id=active_checkpoint,
             git_sha=sha,
             batch_id=batch,
-            count=len(publish_times),
+            count=len(decisions),
         )
         generated_rows = [
             generated_tweet_row(
                 tweet,
                 generated_at=now,
-                scheduled_at=publish_at,
+                scheduled_at=decision.publish_at,
+                cadence_context=decision.context,
+                cadence_action=decision.action,
             )
-            for tweet, publish_at in zip(generated, publish_times, strict=True)
+            for tweet, decision in zip(generated, decisions, strict=True)
         ]
         append_rows(generated_rows)
 
@@ -181,16 +228,20 @@ def run_scheduled_daily_cycle(
             for row in target_rows:
                 row["training_consumed_at"] = consumed_at
     except BaseException:
-        if snapshot is not None:
-            policy.load_state_dict(snapshot)
+        if text_snapshot is not None:
+            policy.load_state_dict(text_snapshot)
+        if cadence_snapshot is not None:
+            cadence_policy.load_state_dict(cadence_snapshot)
         raise
 
     return ScheduledDailyCycleResult(
         training_applied=training_applied,
+        cadence_training_applied=cadence_training_applied,
         checkpoint_id=active_checkpoint,
         batch_id=batch,
         consumed_keys=consumed_keys,
         update_stats=update_stats,
+        cadence_update_stats=cadence_update_stats,
         publish_times=publish_times,
         generated_rows=tuple(generated_rows),
     )
