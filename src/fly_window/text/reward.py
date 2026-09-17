@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Mapping
 
 
@@ -36,6 +38,27 @@ class RewardConfig:
         )
         if any(not math.isfinite(weight) or weight < 0.0 for weight in weights):
             raise ValueError("reward weights must be finite and non-negative")
+
+    @classmethod
+    def from_json(cls, path: Path) -> "RewardConfig":
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("reward config must be a JSON object")
+        required = (
+            "min_age_hours",
+            "view_weight",
+            "like_rate_weight",
+            "repost_rate_weight",
+            "reply_rate_weight",
+            "bookmark_rate_weight",
+            "rate_scale",
+            "smoothing_views",
+            "smoothing_events",
+        )
+        missing = [name for name in required if name not in payload]
+        if missing:
+            raise ValueError(f"reward config missing {', '.join(missing)}")
+        return cls(**{name: float(payload[name]) for name in required})
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,9 +111,6 @@ def _raw_score(row: Mapping[str, object], config: RewardConfig) -> tuple[float, 
         + config.reply_rate_weight * ((replies + event_smoothing) / denominator)
         + config.bookmark_rate_weight * ((bookmarks + event_smoothing) / denominator)
     )
-    # Engagement rates can be very large at low exposure. Compress their contribution
-    # so the configured log-exposure term remains monotone when event counts are held
-    # fixed, while still preserving ordering by engagement at equal exposure.
     engagement_score = math.log1p(config.rate_scale * engagement)
     score = config.view_weight * math.log1p(views) + engagement_score
     return score, (views, likes, reposts, replies, bookmarks)
