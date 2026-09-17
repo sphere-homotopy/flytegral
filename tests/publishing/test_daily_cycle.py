@@ -9,6 +9,7 @@ import torch
 from fly_window.neural.graph import ConnectomeGraph, to_sparse_recurrent
 from fly_window.publishing.cadence import FlyCadencePolicy
 from fly_window.publishing.daily_cycle import run_scheduled_daily_cycle
+from fly_window.publishing.cadence_training import CadenceTrainingConfig
 from fly_window.text.daily_training import DailyTrainingConfig
 from fly_window.text.generation import GenerationConfig
 from fly_window.text.policy import FlyTextPolicy
@@ -244,3 +245,55 @@ def test_cycle_rolls_back_text_update_and_consumption_if_queue_append_fails():
             assert torch.equal(actual.values(), expected.values())
         else:
             assert torch.equal(actual, expected)
+
+
+def test_cycle_consumes_cadence_only_missed_penalty_without_text_training():
+    policy, anchor, cadence, vocabulary = _policies()
+    _force_stop(cadence)
+    rows = [
+        {
+            "idempotency_key": "missed:0",
+            "token_ids": json.dumps([vocabulary.id_for("math")]),
+            "reward": "",
+            "cadence_reward": -1.0,
+            "cadence_context": json.dumps([0.1, 0.2, 0.3, 0.4]),
+            "cadence_action": 1,
+            "training_consumed_at": "",
+        }
+    ]
+    start, end = _window()
+    written = []
+
+    result = run_scheduled_daily_cycle(
+        policy,
+        anchor,
+        cadence,
+        vocabulary=vocabulary,
+        rows=rows,
+        training_config=_training_config(),
+        cadence_training_config=CadenceTrainingConfig(
+            learning_rate=1e-3,
+            weight_decay=0.0,
+            entropy_coefficient=0.01,
+            gradient_clip_norm=1.0,
+            max_update_steps=1,
+        ),
+        generation_config=GenerationConfig(max_tokens=1),
+        current_checkpoint_id="current-a",
+        next_checkpoint_id="daily-cadence-only",
+        batch_id="batch-cadence-only",
+        git_sha="abc123",
+        text_seed=940,
+        cadence_seed=941,
+        window_start=start,
+        window_end=end,
+        now=datetime(2026, 9, 17, 15, 0, tzinfo=UTC),
+        write_checkpoint=lambda *args: written.append(args),
+        append_rows=lambda new_rows: None,
+    )
+
+    assert result.training_applied is False
+    assert result.cadence_training_applied is True
+    assert result.consumed_keys == ("missed:0",)
+    assert rows[0]["training_consumed_at"] != ""
+    assert len(written) == 1
