@@ -211,6 +211,7 @@ jobs:
             --current-checkpoint $env:FLYTWEETS_CURRENT_CHECKPOINT `
             --anchor-checkpoint $env:FLYTWEETS_ANCHOR_CHECKPOINT `
             --cadence-checkpoint $env:FLYTWEETS_CADENCE_CHECKPOINT `
+            --runtime-state $env:FLYTWEETS_RUNTIME_STATE `
             --runtime-config configs/fly_tweets_runtime_v1.json `
             --rows-json $env:FLYTWEETS_ROWS `
             --outbox-jsonl $env:FLYTWEETS_OUTBOX `
