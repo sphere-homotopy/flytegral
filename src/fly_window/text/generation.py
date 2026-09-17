@@ -181,8 +181,8 @@ def generate_batch(
     batch_id: str,
     count: int = 10,
 ) -> list[GeneratedTweet]:
-    if count != 10:
-        raise ValueError("Fly Tweets v1 batches must contain exactly 10 tweets")
+    if isinstance(count, bool) or not isinstance(count, int) or count <= 0:
+        raise ValueError("count must be a positive integer")
     return [
         generate_tweet(
             policy,
@@ -194,5 +194,5 @@ def generate_batch(
             batch_id=batch_id,
             tweet_index=index,
         )
-        for index in range(10)
+        for index in range(count)
     ]
