@@ -13,13 +13,13 @@ permissions:
 
 jobs:
   probe:
-    runs-on: [self-hosted, windows, x64, life-supervisor-pc]
+    runs-on: [self-hosted, windows, x64, flytegral-pc]
     timeout-minutes: 3
     defaults:
       run:
         shell: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ". '{0}'"
     steps:
-      - name: Probe runner and X collector prerequisites
+      - name: Probe Flytegral runner and X collector prerequisites
         run: |
           $ErrorActionPreference = 'Stop'
           Write-Output "COMPUTER=$env:COMPUTERNAME"
@@ -28,14 +28,9 @@ jobs:
           Write-Output "NODE=$((Get-Command node -ErrorAction SilentlyContinue).Source)"
           Write-Output "NPM=$((Get-Command npm -ErrorAction SilentlyContinue).Source)"
           Write-Output "PYTHON=$((Get-Command python -ErrorAction SilentlyContinue).Source)"
-          $legacyProfile = 'C:\tools\x-stats\x-browser-profile'
-          $repoProfile = Join-Path $env:USERPROFILE 'fly-tweets\x-browser-profile'
-          Write-Output "LEGACY_X_PROFILE_EXISTS=$(Test-Path $legacyProfile)"
-          Write-Output "LEGACY_X_PROFILE=$legacyProfile"
-          if (Test-Path $legacyProfile) {
-            $items = @(Get-ChildItem -Force $legacyProfile -ErrorAction SilentlyContinue)
-            Write-Output "LEGACY_X_PROFILE_ITEMS=$($items.Count)"
-          }
-          Write-Output "REPO_X_PROFILE_EXISTS=$(Test-Path $repoProfile)"
-          Write-Output "REPO_X_PROFILE=$repoProfile"
-          Write-Output 'FLYTWEETS_PC_RUNNER=true'
+          $xProfile = 'C:\tools\x-stats\x-browser-profile'
+          $runtimeRoot = Join-Path $env:LOCALAPPDATA 'flytegral\fly-tweets'
+          Write-Output "X_PROFILE_EXISTS=$(Test-Path $xProfile)"
+          Write-Output "X_PROFILE=$xProfile"
+          Write-Output "FLYTEGRAL_RUNTIME=$runtimeRoot"
+          Write-Output 'FLYTEGRAL_PC_RUNNER=true'
