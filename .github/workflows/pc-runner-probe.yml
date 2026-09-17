@@ -49,3 +49,32 @@ jobs:
           Write-Output "X_PROFILE=$xProfile"
           Write-Output "FLYTEGRAL_RUNTIME=$runtimeRoot"
           Write-Output 'FLYTEGRAL_PC_RUNNER=true'
+
+      - name: Queue legacy runtime migration once
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $repo = 'sphere-homotopy/flytegral'
+          $workflow = 'fly-tweets-migrate-legacy-runtime.yml'
+          $branch = 'feature/fly-tweets-v1'
+
+          gh auth status --hostname github.com | Out-Host
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub CLI authentication is unavailable for migration dispatch.' }
+
+          $runsRaw = gh run list -R $repo --workflow $workflow --branch $branch --limit 20 --json databaseId,status,conclusion,createdAt
+          if ($LASTEXITCODE -ne 0) { throw 'Could not inspect existing migration runs.' }
+          $runs = @($runsRaw | ConvertFrom-Json)
+          $active = @($runs | Where-Object { $_.status -ne 'completed' })
+          if ($active.Count -gt 0) {
+            Write-Output "MIGRATION_ALREADY_ACTIVE=$($active[0].databaseId)"
+            exit 0
+          }
+
+          $successful = @($runs | Where-Object { $_.status -eq 'completed' -and $_.conclusion -eq 'success' })
+          if ($successful.Count -gt 0) {
+            Write-Output "MIGRATION_ALREADY_SUCCEEDED=$($successful[0].databaseId)"
+            exit 0
+          }
+
+          gh workflow run $workflow -R $repo --ref $branch
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to dispatch Fly Tweets runtime migration.' }
+          Write-Output 'MIGRATION_DISPATCHED=true'
