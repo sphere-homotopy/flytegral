@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -11,6 +12,76 @@ from torch.nn import functional as F
 from fly_window.text.corpus import CorpusTweet, prepare_corpus_tweet
 from fly_window.text.policy import FlyTextPolicy
 from fly_window.text.vocabulary import FlyVocabulary
+
+
+@dataclass(frozen=True, slots=True)
+class TextTrainingConfig:
+    seed: int
+    curriculum_examples: int
+    stage_a_epochs: int
+    stage_b_epochs: int
+    stage_c_epochs: int
+    batch_size: int
+    learning_rate: float
+    weight_decay: float
+    gradient_clip_norm: float
+    max_oov_fraction: float
+    stage_c_teacher_probability: float
+
+    def __post_init__(self) -> None:
+        if self.curriculum_examples <= 0:
+            raise ValueError("curriculum_examples must be positive")
+        if min(self.stage_a_epochs, self.stage_b_epochs, self.stage_c_epochs) < 0:
+            raise ValueError("training epoch counts must be non-negative")
+        if self.batch_size <= 0:
+            raise ValueError("batch_size must be positive")
+        if self.learning_rate <= 0.0:
+            raise ValueError("learning_rate must be positive")
+        if self.weight_decay < 0.0:
+            raise ValueError("weight_decay must be non-negative")
+        if self.gradient_clip_norm <= 0.0:
+            raise ValueError("gradient_clip_norm must be positive")
+        if not 0.0 <= self.max_oov_fraction <= 1.0:
+            raise ValueError("max_oov_fraction must lie in [0, 1]")
+        if not 0.0 <= self.stage_c_teacher_probability <= 1.0:
+            raise ValueError("stage_c_teacher_probability must lie in [0, 1]")
+
+    @classmethod
+    def from_json(cls, path: Path) -> "TextTrainingConfig":
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("text training config must be a JSON object")
+        try:
+            return cls(
+                seed=int(payload["seed"]),
+                curriculum_examples=int(payload["curriculum_examples"]),
+                stage_a_epochs=int(payload["stage_a_epochs"]),
+                stage_b_epochs=int(payload["stage_b_epochs"]),
+                stage_c_epochs=int(payload["stage_c_epochs"]),
+                batch_size=int(payload["batch_size"]),
+                learning_rate=float(payload["learning_rate"]),
+                weight_decay=float(payload["weight_decay"]),
+                gradient_clip_norm=float(payload["gradient_clip_norm"]),
+                max_oov_fraction=float(payload["max_oov_fraction"]),
+                stage_c_teacher_probability=float(payload["stage_c_teacher_probability"]),
+            )
+        except KeyError as error:
+            raise ValueError(f"text training config missing {error.args[0]}") from error
+
+
+def choose_next_input(
+    *,
+    teacher_token: int,
+    sampled_token: int,
+    teacher_probability: float,
+    draw: float,
+) -> int:
+    """Pure scheduled-sampling decision used by Stage C and its deterministic tests."""
+    if not 0.0 <= teacher_probability <= 1.0:
+        raise ValueError("teacher_probability must lie in [0, 1]")
+    if not 0.0 <= draw < 1.0:
+        raise ValueError("draw must lie in [0, 1)")
+    return int(teacher_token if draw < teacher_probability else sampled_token)
 
 
 def _canonical_status_url(tweet_url: str) -> str | None:
