@@ -104,7 +104,9 @@ def run_scheduled_daily_cycle(
         rows,
         action_count=cadence_policy.action_count,
     )
-    consumed_keys = tuple(example.idempotency_key for example in examples)
+    text_consumed_keys = {example.idempotency_key for example in examples}
+    cadence_consumed_keys = {example.idempotency_key for example in cadence_examples}
+    consumed_keys = tuple(sorted(text_consumed_keys | cadence_consumed_keys))
     consumed_set = set(consumed_keys)
     target_rows = [
         row
@@ -112,7 +114,7 @@ def run_scheduled_daily_cycle(
         if not str(row.get("training_consumed_at", "") or "").strip()
         and str(row.get("idempotency_key", "") or "").strip() in consumed_set
     ]
-    if len(target_rows) != len(examples):
+    if len(target_rows) != len(consumed_set):
         raise ValueError("training rows do not map one-to-one to unconsumed examples")
 
     training_applied = bool(examples)
@@ -225,7 +227,7 @@ def run_scheduled_daily_cycle(
         ]
         append_rows(generated_rows)
 
-        if training_applied:
+        if any_training_applied:
             consumed_at = now.isoformat()
             for row in target_rows:
                 row["training_consumed_at"] = consumed_at
