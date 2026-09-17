@@ -27,3 +27,18 @@ def test_heavy_fly_tweets_workflows_have_no_hosted_runner_fallback():
         assert "ubuntu-latest" not in text, filename
         assert "windows-latest" not in text, filename
         assert "macos-latest" not in text, filename
+
+
+def test_native_bootstrap_chain_dispatches_each_next_stage_idempotently():
+    probe = (WORKFLOW_DIR / "pc-runner-probe.yml").read_text(encoding="utf-8")
+    migration = (WORKFLOW_DIR / "fly-tweets-migrate-legacy-runtime.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "gh run list" in probe
+    assert "fly-tweets-migrate-legacy-runtime.yml" in probe
+    assert "gh workflow run $workflow" in probe
+
+    assert "gh run list" in migration
+    assert "fly-tweets-initial-pretrain.yml" in migration
+    assert "gh workflow run $workflow" in migration
