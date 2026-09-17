@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 import torch
 from torch.nn import functional as F
 
+from fly_window.publishing.rows import generated_tweet_row
+from fly_window.text.generation import GenerationConfig, generate_batch
 from fly_window.text.policy import FlyTextPolicy
 from fly_window.text.vocabulary import FlyVocabulary
 
@@ -80,6 +83,19 @@ class DailyUpdateStats:
     final_policy_loss: float
     final_entropy: float
     final_anchor_kl: float
+
+
+@dataclass(frozen=True, slots=True)
+class DailyRunResult:
+    checkpoint_id: str
+    batch_id: str
+    consumed_keys: tuple[str, ...]
+    update_stats: DailyUpdateStats
+    generated_rows: tuple[dict[str, object], ...]
+
+
+CheckpointWriter = Callable[[FlyTextPolicy, str, Mapping[str, object]], None]
+RowsAppender = Callable[[list[dict[str, object]]], None]
 
 
 def _parse_token_ids(value: object) -> tuple[int, ...]:
@@ -311,4 +327,114 @@ def apply_daily_policy_update(
         final_policy_loss=float(final_objective.policy_loss.detach().cpu()),
         final_entropy=float(final_objective.entropy.detach().cpu()),
         final_anchor_kl=float(final_objective.anchor_kl.detach().cpu()),
+    )
+
+
+def run_daily_update(
+    policy: FlyTextPolicy,
+    anchor_policy: FlyTextPolicy,
+    *,
+    vocabulary: FlyVocabulary,
+    rows: Sequence[MutableMapping[str, object]],
+    config: DailyTrainingConfig,
+    generation_config: GenerationConfig,
+    checkpoint_id: str,
+    batch_id: str,
+    git_sha: str,
+    base_seed: int,
+    now: datetime,
+    write_checkpoint: CheckpointWriter,
+    append_rows: RowsAppender,
+) -> DailyRunResult:
+    """Run one logically atomic Fly Tweets learning/generation transaction.
+
+    The model is rolled back on any downstream failure. Training source rows are not
+    marked consumed until both the immutable checkpoint write and idempotent Sheet
+    append have succeeded. A checkpoint created before a later failure may remain as
+    an unreferenced immutable artifact; it is never treated as deployed by this call.
+    """
+    checkpoint = str(checkpoint_id).strip()
+    batch = str(batch_id).strip()
+    sha = str(git_sha).strip()
+    if not checkpoint:
+        raise ValueError("checkpoint_id is required")
+    if not batch:
+        raise ValueError("batch_id is required")
+    if not sha:
+        raise ValueError("git_sha is required")
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("now must be timezone-aware")
+
+    examples = training_examples_from_rows(rows, vocabulary=vocabulary)
+    if not examples:
+        raise ValueError("no unconsumed training examples")
+    consumed_keys = tuple(example.idempotency_key for example in examples)
+    consumed_set = set(consumed_keys)
+    target_rows = [
+        row
+        for row in rows
+        if not str(row.get("training_consumed_at", "") or "").strip()
+        and str(row.get("idempotency_key", "") or "").strip() in consumed_set
+    ]
+    if len(target_rows) != len(examples):
+        raise ValueError("training rows do not map one-to-one to unconsumed examples")
+
+    snapshot = _snapshot_state(policy)
+    try:
+        stats = apply_daily_policy_update(
+            policy,
+            anchor_policy,
+            vocabulary=vocabulary,
+            examples=examples,
+            config=config,
+        )
+        manifest: dict[str, object] = {
+            "schema_version": 1,
+            "checkpoint_id": checkpoint,
+            "batch_id": batch,
+            "git_sha": sha,
+            "example_count": stats.example_count,
+            "update_steps": stats.update_steps,
+            "losses": list(stats.losses),
+            "gradient_norms": list(stats.gradient_norms),
+            "final_policy_loss": stats.final_policy_loss,
+            "final_entropy": stats.final_entropy,
+            "final_anchor_kl": stats.final_anchor_kl,
+            "consumed_keys": list(consumed_keys),
+            "completed_at": now.isoformat(),
+            "llm_in_training_path": False,
+            "recurrent_connectome_trainable": bool(policy.recurrent.requires_grad),
+        }
+        write_checkpoint(policy, checkpoint, manifest)
+
+        generated = generate_batch(
+            policy,
+            vocabulary,
+            base_seed=int(base_seed),
+            config=generation_config,
+            checkpoint_id=checkpoint,
+            git_sha=sha,
+            batch_id=batch,
+            count=10,
+        )
+        generated_rows = [
+            generated_tweet_row(tweet, generated_at=now) for tweet in generated
+        ]
+        if len(generated_rows) != 10:
+            raise RuntimeError("daily update must generate exactly 10 Sheet rows")
+        append_rows(generated_rows)
+
+        consumed_at = now.isoformat()
+        for row in target_rows:
+            row["training_consumed_at"] = consumed_at
+    except BaseException:
+        policy.load_state_dict(snapshot)
+        raise
+
+    return DailyRunResult(
+        checkpoint_id=checkpoint,
+        batch_id=batch,
+        consumed_keys=consumed_keys,
+        update_stats=stats,
+        generated_rows=tuple(generated_rows),
     )
