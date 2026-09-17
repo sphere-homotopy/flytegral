@@ -1,7 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+import json
+import os
+import tempfile
+from dataclasses import asdict, dataclass, replace
 from datetime import date
+from pathlib import Path
 from typing import MutableMapping
 
 
@@ -140,3 +144,100 @@ def complete_request(
     )
     requests[key] = completed
     return completed
+
+
+def _request_from_payload(key: str, payload: object) -> DailyRequest:
+    if not isinstance(payload, dict):
+        raise ValueError(f"request {key} must be a JSON object")
+    required = {
+        "request_date",
+        "state",
+        "attempts",
+        "checkpoint_id",
+        "batch_id",
+        "last_error",
+    }
+    missing = sorted(required.difference(payload))
+    if missing:
+        raise ValueError(f"request {key} missing fields: {', '.join(missing)}")
+    attempts = payload["attempts"]
+    if isinstance(attempts, bool) or not isinstance(attempts, int):
+        raise ValueError(f"request {key} attempts must be an integer")
+    request = DailyRequest(
+        request_date=str(payload["request_date"]),
+        state=str(payload["state"]),
+        attempts=attempts,
+        checkpoint_id=str(payload["checkpoint_id"]),
+        batch_id=str(payload["batch_id"]),
+        last_error=str(payload["last_error"]),
+    )
+    if request.request_date != key:
+        raise ValueError("request mapping key does not match request_date")
+    return request
+
+
+def load_requests(path: Path) -> dict[str, DailyRequest]:
+    """Load and fully validate the durable date-keyed request ledger."""
+    path = Path(path)
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise ValueError(f"invalid request ledger JSON: {error.msg}") from error
+    if not isinstance(payload, dict):
+        raise ValueError("request ledger must be a JSON object")
+    if payload.get("schema_version") != 1:
+        raise ValueError("unsupported request ledger schema_version")
+    raw_requests = payload.get("requests")
+    if not isinstance(raw_requests, dict):
+        raise ValueError("request ledger requests must be a JSON object")
+
+    restored: dict[str, DailyRequest] = {}
+    for raw_key, raw_request in raw_requests.items():
+        key = _date_key(str(raw_key))
+        restored[key] = _request_from_payload(key, raw_request)
+    return restored
+
+
+def save_requests_atomic(
+    path: Path,
+    requests: MutableMapping[str, DailyRequest],
+) -> None:
+    """Durably replace the ledger without exposing a partially written JSON file."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    serialized: dict[str, dict[str, object]] = {}
+    for raw_key, request in sorted(requests.items()):
+        key = _date_key(raw_key)
+        if request.request_date != key:
+            raise ValueError("request mapping key does not match request_date")
+        serialized[key] = asdict(request)
+
+    body = json.dumps(
+        {"schema_version": 1, "requests": serialized},
+        ensure_ascii=False,
+        indent=2,
+        sort_keys=True,
+    ) + "\n"
+
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            newline="\n",
+            dir=path.parent,
+            prefix=f"{path.name}.tmp-",
+            delete=False,
+        ) as handle:
+            temp_path = Path(handle.name)
+            handle.write(body)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+        temp_path = None
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
