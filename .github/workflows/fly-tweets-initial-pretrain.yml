@@ -214,6 +214,15 @@ jobs:
           $workflow = 'fly-tweets-daily.yml'
           $branch = 'feature/fly-tweets-v1'
 
+          $defaultBranch = (gh api "repos/$repo" --jq .default_branch).Trim()
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($defaultBranch)) {
+            throw 'Could not resolve repository default branch.'
+          }
+          if ($branch -ne $defaultBranch) {
+            Write-Output "DAILY_BOOTSTRAP_DEFERRED_FEATURE_BRANCH=$branch"
+            exit 0
+          }
+
           gh auth status --hostname github.com | Out-Host
           if ($LASTEXITCODE -ne 0) { throw 'GitHub CLI authentication is unavailable for daily dispatch.' }
 
