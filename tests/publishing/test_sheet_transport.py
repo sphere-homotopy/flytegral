@@ -6,6 +6,7 @@ from fly_window.publishing.sheet_transport import (
     build_fly_tweets_request,
     complete_generated_batches,
     parse_fly_tweets_response,
+    queue_horizon_from_rows,
 )
 
 
@@ -63,3 +64,23 @@ def test_parse_response_requires_rows() -> None:
 def test_parse_response_returns_sheet_rows() -> None:
     rows = [_row("b1", index, status="scheduled") for index in range(10)]
     assert parse_fly_tweets_response({"ok": True, "result": {"rows": rows}}) == rows
+
+
+def test_queue_horizon_comes_from_latest_scheduled_sheet_row() -> None:
+    rows = [
+        {"scheduled_at": "2026-09-18T08:10:00+02:00"},
+        {"scheduled_at": ""},
+        {"scheduled_at": "2026-09-18T22:05:00+02:00"},
+    ]
+
+    horizon = queue_horizon_from_rows(rows)
+
+    assert horizon is not None
+    assert horizon.isoformat() == "2026-09-18T20:05:00+00:00"
+
+
+def test_queue_horizon_ignores_invalid_and_empty_values() -> None:
+    assert queue_horizon_from_rows([
+        {"scheduled_at": ""},
+        {"scheduled_at": "not-a-date"},
+    ]) is None
