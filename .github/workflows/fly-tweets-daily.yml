@@ -170,6 +170,7 @@ jobs:
         working-directory: collector
         env:
           X_PROFILE_DIR: C:\tools\x-stats\x-browser-profile
+          X_EXPECTED_HANDLE: fly_topology
         run: |
           $ErrorActionPreference = 'Stop'
           $metrics = Join-Path $env:FLYTWEETS_STATE_DIR 'metrics-latest.jsonl'
