@@ -1,9 +1,11 @@
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from fly_window.text.reward import RewardConfig, compute_daily_rewards
 
 
 NOW = datetime(2026, 9, 17, 12, 0, tzinfo=UTC)
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _row(
@@ -39,6 +41,15 @@ def _config() -> RewardConfig:
         smoothing_views=100.0,
         smoothing_events=0.5,
     )
+
+
+def test_versioned_reward_config_loads_and_prioritizes_stronger_engagement():
+    config = RewardConfig.from_json(REPO_ROOT / "configs" / "daily_reward_v1.json")
+
+    assert config.min_age_hours == 24.0
+    assert config.repost_rate_weight > config.like_rate_weight
+    assert config.reply_rate_weight > config.like_rate_weight
+    assert config.bookmark_rate_weight > config.like_rate_weight
 
 
 def test_reward_excludes_tweets_younger_than_minimum_age():
