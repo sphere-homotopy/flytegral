@@ -135,6 +135,7 @@ def _load_runtime_state(path: Path) -> RuntimeState:
     if not isinstance(payload, dict):
         raise ValueError("runtime-state must contain a JSON object")
     return RuntimeState(
+        started_at=_parse_datetime(payload.get("started_at"), field="started_at"),
         last_stats_at=_parse_datetime(payload.get("last_stats_at"), field="last_stats_at"),
         last_training_at=_parse_datetime(
             payload.get("last_training_at"), field="last_training_at"
@@ -152,6 +153,7 @@ def _load_runtime_state(path: Path) -> RuntimeState:
 
 def _write_runtime_state(path: Path, state: RuntimeState) -> None:
     payload = {
+        "started_at": None if state.started_at is None else state.started_at.isoformat(),
         "last_stats_at": None if state.last_stats_at is None else state.last_stats_at.isoformat(),
         "last_training_at": (
             None if state.last_training_at is None else state.last_training_at.isoformat()
@@ -425,6 +427,7 @@ def main() -> None:
         last_stats_at = latest_stats
     next_state = replace(
         runtime_state,
+        started_at=runtime_state.started_at or now,
         last_stats_at=last_stats_at,
         last_training_at=now if result.training_applied else runtime_state.last_training_at,
         last_generation_at=now,
