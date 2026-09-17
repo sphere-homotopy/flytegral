@@ -54,7 +54,7 @@ def _parse_datetime(value: object, *, field: str) -> datetime | None:
 
 
 def _load_rows(path: Path) -> list[dict[str, object]]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = json.loads(path.read_text(encoding="utf-8-sig"))
     if isinstance(payload, dict):
         payload = payload.get("rows")
     if not isinstance(payload, list) or any(not isinstance(row, dict) for row in payload):
@@ -132,7 +132,7 @@ def _build_cadence_policy(
 def _load_runtime_state(path: Path) -> RuntimeState:
     if not path.exists():
         return RuntimeState()
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(payload, dict):
         raise ValueError("runtime-state must contain a JSON object")
     return RuntimeState(
@@ -172,7 +172,7 @@ def _existing_outbox(path: Path) -> dict[str, dict[str, object]]:
     rows: dict[str, dict[str, object]] = {}
     if not path.exists():
         return rows
-    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+    for line_number, line in enumerate(path.read_text(encoding="utf-8-sig").splitlines(), start=1):
         if not line.strip():
             continue
         row = json.loads(line)
@@ -363,7 +363,7 @@ def main() -> None:
         if manifest_path.exists() or checkpoint_path.exists():
             if not manifest_path.exists() or not checkpoint_path.exists():
                 raise RuntimeError("partial immutable daily checkpoint already exists")
-            existing = json.loads(manifest_path.read_text(encoding="utf-8"))
+            existing = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
             stable_fields = ("checkpoint_id", "parent_checkpoint_id", "batch_id", "git_sha")
             if any(existing.get(field) != manifest.get(field) for field in stable_fields):
                 raise RuntimeError("conflicting immutable daily checkpoint already exists")
