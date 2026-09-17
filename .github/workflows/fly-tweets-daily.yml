@@ -134,7 +134,8 @@ jobs:
           & $env:FLYTWEETS_PYTHON scripts/sync_fly_tweets_sheet.py `
             --action ingest `
             --rows-json $env:FLYTWEETS_ROWS `
-            --transport-config $env:FLYTWEETS_SHEET_TRANSPORT_CONFIG
+            --transport-config $env:FLYTWEETS_SHEET_TRANSPORT_CONFIG `
+            --runtime-state $env:FLYTWEETS_RUNTIME_STATE
 
       - name: Sync Google Sheet state before stats
         run: |
@@ -142,7 +143,8 @@ jobs:
           & $env:FLYTWEETS_PYTHON scripts/sync_fly_tweets_sheet.py `
             --action sync `
             --rows-json $env:FLYTWEETS_ROWS `
-            --transport-config $env:FLYTWEETS_SHEET_TRANSPORT_CONFIG
+            --transport-config $env:FLYTWEETS_SHEET_TRANSPORT_CONFIG `
+            --runtime-state $env:FLYTWEETS_RUNTIME_STATE
 
       - name: Prepare metrics targets
         run: |
@@ -237,7 +239,8 @@ jobs:
           & $env:FLYTWEETS_PYTHON scripts/sync_fly_tweets_sheet.py `
             --action ingest `
             --rows-json $env:FLYTWEETS_ROWS `
-            --transport-config $env:FLYTWEETS_SHEET_TRANSPORT_CONFIG
+            --transport-config $env:FLYTWEETS_SHEET_TRANSPORT_CONFIG `
+            --runtime-state $env:FLYTWEETS_RUNTIME_STATE
 
       - name: Build non-sensitive health heartbeat
         run: |
