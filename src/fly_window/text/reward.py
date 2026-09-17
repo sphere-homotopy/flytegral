@@ -88,7 +88,11 @@ def _raw_score(row: Mapping[str, object], config: RewardConfig) -> tuple[float, 
         + config.reply_rate_weight * ((replies + event_smoothing) / denominator)
         + config.bookmark_rate_weight * ((bookmarks + event_smoothing) / denominator)
     )
-    score = config.view_weight * math.log1p(views) + config.rate_scale * engagement
+    # Engagement rates can be very large at low exposure. Compress their contribution
+    # so the configured log-exposure term remains monotone when event counts are held
+    # fixed, while still preserving ordering by engagement at equal exposure.
+    engagement_score = math.log1p(config.rate_scale * engagement)
+    score = config.view_weight * math.log1p(views) + engagement_score
     return score, (views, likes, reposts, replies, bookmarks)
 
 
