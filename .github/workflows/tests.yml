@@ -40,12 +40,20 @@ jobs:
           node --check collector/metrics-core.js
           node --check collector/collect-fly-tweet-stats.js
           node --check apps_script/FlyTweetsQueue.js
+          node --check apps_script/FlyTweetsBuffer.js
       - name: Smoke training CLI
         run: python scripts/train.py --help > /dev/null
       - name: Smoke text pretraining CLI
         run: python scripts/train_text.py --help > /dev/null
       - name: Smoke tweet generation CLI
         run: python scripts/generate_tweets.py --help > /dev/null
+      - name: Smoke Fly Tweets daily CLIs
+        run: |
+          python scripts/run_daily_text_training.py --help > /dev/null
+          python scripts/merge_fly_tweet_stats.py --help > /dev/null
+          python scripts/sync_fly_tweet_outbox.py --help > /dev/null
+          python scripts/publish_fly_tweets_buffer.py --help > /dev/null
+          python scripts/init_cadence.py --help > /dev/null
       - name: Smoke evaluation CLI
         run: python scripts/evaluate.py --help > /dev/null
       - name: Smoke benchmark CLI
