@@ -12,6 +12,7 @@ import torch
 
 from fly_window.neural.graph import load_connectome_graph, to_sparse_recurrent
 from fly_window.publishing.cadence import FlyCadencePolicy
+from fly_window.publishing.cadence_training import CadenceTrainingConfig
 from fly_window.publishing.daily_cycle import run_scheduled_daily_cycle
 from fly_window.publishing.runtime import (
     RuntimeConfig,
@@ -109,7 +110,7 @@ def _build_cadence_policy(
     nodes_parquet: Path,
     device: torch.device,
 ) -> tuple[FlyCadencePolicy, float, int]:
-    raw_waits = checkpoint.get("wait_minutes")
+    raw_waits = checkpoint.get("wait_minutes", checkpoint.get("cadence_wait_minutes"))
     if not isinstance(raw_waits, (list, tuple)) or not raw_waits:
         raise ValueError("cadence checkpoint is missing wait_minutes")
     wait_minutes = tuple(int(value) for value in raw_waits)
@@ -249,8 +250,8 @@ def _parser() -> argparse.ArgumentParser:
         description=(
             "Run one durable no-LLM Fly Tweets cycle. MaleCNS cadence owns both "
             "publication count and absolute publish times. Fresh settled engagement "
-            "updates the text policy when available; missing stats never block "
-            "generation."
+            "updates text and cadence policies when available; missing stats never "
+            "block generation."
         )
     )
     parser.add_argument("--request-date", required=True, help="Scheduled occurrence date, YYYY-MM-DD")
@@ -265,6 +266,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--run-root", type=Path, required=True)
     parser.add_argument("--reward-config", type=Path, required=True)
     parser.add_argument("--training-config", type=Path, required=True)
+    parser.add_argument("--cadence-training-config", type=Path, required=True)
     parser.add_argument("--base-seed", type=int, required=True)
     parser.add_argument(
         "--graph-npz",
@@ -309,6 +311,7 @@ def main() -> None:
     runtime_state = _load_runtime_state(args.runtime_state)
     reward_config = RewardConfig.from_json(args.reward_config)
     training_config = DailyTrainingConfig.from_json(args.training_config)
+    cadence_training_config = CadenceTrainingConfig.from_json(args.cadence_training_config)
     generation_config = GenerationConfig(
         temperature=args.temperature,
         max_tokens=args.max_tokens,
@@ -385,6 +388,9 @@ def main() -> None:
         payload["model_state_dict"] = updated_policy.state_dict()
         payload["cadence_state_dict"] = updated_cadence.state_dict()
         payload["cadence_wait_minutes"] = tuple(updated_cadence.wait_minutes)
+        payload["wait_minutes"] = tuple(updated_cadence.wait_minutes)
+        payload["temperature"] = cadence_temperature
+        payload["max_posts_per_24h"] = max_posts_per_24h
         payload["git_sha"] = git_sha
         payload["parent_checkpoint"] = str(args.current_checkpoint)
         payload["cadence_checkpoint"] = str(args.cadence_checkpoint)
@@ -402,6 +408,7 @@ def main() -> None:
         vocabulary=vocabulary,
         rows=rows,
         training_config=training_config,
+        cadence_training_config=cadence_training_config,
         generation_config=generation_config,
         current_checkpoint_id=current_checkpoint_id,
         next_checkpoint_id=next_checkpoint_id,
@@ -419,9 +426,8 @@ def main() -> None:
     )
 
     _write_rows(args.rows_json, rows)
-    deployed_checkpoint = (
-        run_dir / "checkpoint.pt" if result.training_applied else args.current_checkpoint
-    )
+    any_training = result.training_applied or result.cadence_training_applied
+    deployed_checkpoint = run_dir / "checkpoint.pt" if any_training else args.current_checkpoint
     last_stats_at = runtime_state.last_stats_at
     if latest_stats is not None and (last_stats_at is None or latest_stats > last_stats_at):
         last_stats_at = latest_stats
@@ -429,7 +435,7 @@ def main() -> None:
         runtime_state,
         started_at=runtime_state.started_at or now,
         last_stats_at=last_stats_at,
-        last_training_at=now if result.training_applied else runtime_state.last_training_at,
+        last_training_at=now if any_training else runtime_state.last_training_at,
         last_generation_at=now,
         queue_horizon_at=window_end,
         current_checkpoint=result.checkpoint_id,
@@ -444,6 +450,7 @@ def main() -> None:
                 "attempt": args.attempt,
                 "bootstrap": bootstrap,
                 "training_applied": result.training_applied,
+                "cadence_training_applied": result.cadence_training_applied,
                 "rewarded_rows": rewarded_rows,
                 "consumed_rows": len(result.consumed_keys),
                 "generated_rows": len(result.generated_rows),
