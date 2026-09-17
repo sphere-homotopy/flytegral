@@ -68,6 +68,18 @@ def _state(policy: FlyTextPolicy):
     return {key: value.detach().clone() for key, value in policy.state_dict().items()}
 
 
+def _tensor_equal(left: torch.Tensor, right: torch.Tensor) -> bool:
+    if left.layout == torch.sparse_coo or right.layout == torch.sparse_coo:
+        if left.layout != torch.sparse_coo or right.layout != torch.sparse_coo:
+            return False
+        left_sparse = left.coalesce()
+        right_sparse = right.coalesce()
+        return torch.equal(left_sparse.indices(), right_sparse.indices()) and torch.equal(
+            left_sparse.values(), right_sparse.values()
+        )
+    return torch.equal(left, right)
+
+
 def test_daily_transaction_marks_training_rows_only_after_checkpoint_and_append_succeed():
     vocabulary = build_v1_vocabulary()
     policy = _policy()
@@ -145,4 +157,4 @@ def test_daily_transaction_rolls_back_model_and_consumption_if_append_fails():
 
     assert all(row["training_consumed_at"] == "" for row in rows)
     after = policy.state_dict()
-    assert all(torch.equal(after[key], value) for key, value in before.items())
+    assert all(_tensor_equal(after[key], value) for key, value in before.items())
