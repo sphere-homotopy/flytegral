@@ -6,6 +6,7 @@ const { chromium } = require('playwright');
 const {
   metricsCollectorLaunchOptions,
   parseMetricAriaLabel,
+  xProfileHrefMatchesExpectedHandle,
 } = require('./metrics-core');
 
 function parseArgs(argv) {
@@ -27,6 +28,10 @@ function profileDir() {
   return process.env.X_PROFILE_DIR
     ? path.resolve(process.env.X_PROFILE_DIR)
     : path.resolve(__dirname, '..', 'artifacts', 'x-browser-profile');
+}
+
+function expectedHandle() {
+  return String(process.env.X_EXPECTED_HANDLE || 'fly_topology').trim();
 }
 
 function loadRows(filePath) {
@@ -61,6 +66,20 @@ async function assertLoggedIn(page) {
     state: 'attached',
     timeout: 15_000,
   });
+
+  const profileLink = page.locator('[data-testid="AppTabBar_Profile_Link"]').first();
+  await profileLink.waitFor({ state: 'attached', timeout: 15_000 });
+  const profileHref = await profileLink.getAttribute('href');
+  const handle = expectedHandle();
+  if (!xProfileHrefMatchesExpectedHandle(profileHref, handle)) {
+    throw new Error(
+      `X session is logged into unexpected account: expected @${handle.replace(/^@/, '')}, profile href=${profileHref || '<missing>'}`,
+    );
+  }
+  console.log(JSON.stringify({
+    event: 'x_session_verified',
+    handle: handle.replace(/^@/, ''),
+  }));
 }
 
 async function collectOne(page, sourceRow) {
