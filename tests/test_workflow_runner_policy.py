@@ -35,6 +35,9 @@ def test_native_bootstrap_chain_dispatches_each_next_stage_idempotently():
     migration = (WORKFLOW_DIR / "fly-tweets-migrate-legacy-runtime.yml").read_text(
         encoding="utf-8"
     )
+    pretrain = (WORKFLOW_DIR / "fly-tweets-initial-pretrain.yml").read_text(
+        encoding="utf-8"
+    )
 
     assert "gh run list" in probe
     assert "fly-tweets-migrate-legacy-runtime.yml" in probe
@@ -43,6 +46,10 @@ def test_native_bootstrap_chain_dispatches_each_next_stage_idempotently():
     assert "gh run list" in migration
     assert "fly-tweets-initial-pretrain.yml" in migration
     assert "gh workflow run $workflow" in migration
+
+    assert "gh run list" in pretrain
+    assert "fly-tweets-daily.yml" in pretrain
+    assert "gh workflow run $workflow" in pretrain
 
 
 def test_daily_worker_is_native_headless_and_cadence_owned():
