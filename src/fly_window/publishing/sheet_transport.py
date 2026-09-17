@@ -4,6 +4,7 @@ import json
 import urllib.error
 import urllib.request
 from collections import OrderedDict
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -122,3 +123,21 @@ def write_rows_atomic(path: Path, rows: Sequence[Mapping[str, object]]) -> None:
         encoding="utf-8",
     )
     temporary.replace(path)
+
+
+def queue_horizon_from_rows(
+    rows: Sequence[Mapping[str, object]],
+) -> datetime | None:
+    values: list[datetime] = []
+    for row in rows:
+        text = str(row.get("scheduled_at", "") or "").strip()
+        if not text:
+            continue
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            continue
+        values.append(parsed.astimezone(UTC))
+    return max(values, default=None)
