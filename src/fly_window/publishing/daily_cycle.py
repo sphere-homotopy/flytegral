@@ -211,11 +211,13 @@ def run_scheduled_daily_cycle(
             batch_id=batch,
             count=len(decisions),
         )
+        batch_size = len(decisions)
         generated_rows = [
             generated_tweet_row(
                 tweet,
                 generated_at=now,
                 scheduled_at=decision.publish_at,
+                batch_size=batch_size,
                 cadence_context=decision.context,
                 cadence_action=decision.action,
             )
