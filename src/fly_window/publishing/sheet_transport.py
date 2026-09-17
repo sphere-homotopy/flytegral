@@ -4,9 +4,32 @@ import json
 import urllib.error
 import urllib.request
 from collections import OrderedDict
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Mapping, Sequence
+
+
+def _batch_size(row: Mapping[str, object]) -> int | None:
+    try:
+        value = int(row.get("batch_size", 0))
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def _is_complete_batch(rows: Sequence[Mapping[str, object]]) -> bool:
+    if not rows:
+        return False
+    sizes = {_batch_size(row) for row in rows}
+    if len(sizes) != 1:
+        return False
+    batch_size = next(iter(sizes))
+    if batch_size is None or len(rows) != batch_size:
+        return False
+    try:
+        indexes = sorted(int(row.get("tweet_index", -1)) for row in rows)
+    except (TypeError, ValueError):
+        return False
+    return indexes == list(range(batch_size))
 
 
 def complete_generated_batches(
@@ -26,13 +49,9 @@ def complete_generated_batches(
 
     result: dict[str, list[dict[str, object]]] = {}
     for batch_id, batch_rows in grouped.items():
-        try:
-            ordered = sorted(batch_rows, key=lambda row: int(row.get("tweet_index", -1)))
-        except (TypeError, ValueError):
+        if not _is_complete_batch(batch_rows):
             continue
-        indexes = [int(row.get("tweet_index", -1)) for row in ordered]
-        if indexes != list(range(10)):
-            continue
+        ordered = sorted(batch_rows, key=lambda row: int(row["tweet_index"]))
         result[batch_id] = ordered
     return result
 
@@ -49,10 +68,12 @@ def build_fly_tweets_request(
     if rows is None:
         raise ValueError("ingest requires rows")
     payload_rows = [dict(row) for row in rows]
-    if len(payload_rows) != 10:
-        raise ValueError("ingest requires exactly 10 rows")
+    if not _is_complete_batch(payload_rows):
+        raise ValueError("ingest rows must form one complete fly-selected batch_size")
+    batch_ids = {str(row.get("batch_id", "") or "").strip() for row in payload_rows}
+    if len(batch_ids) != 1 or "" in batch_ids:
+        raise ValueError("ingest rows must share one batch_id")
     return {"action": "ingest", "rows": payload_rows}
-
 
 def parse_fly_tweets_response(payload: Mapping[str, Any]) -> list[dict[str, object]]:
     if not bool(payload.get("ok")):
@@ -123,21 +144,3 @@ def write_rows_atomic(path: Path, rows: Sequence[Mapping[str, object]]) -> None:
         encoding="utf-8",
     )
     temporary.replace(path)
-
-
-def queue_horizon_from_rows(
-    rows: Sequence[Mapping[str, object]],
-) -> datetime | None:
-    values: list[datetime] = []
-    for row in rows:
-        text = str(row.get("scheduled_at", "") or "").strip()
-        if not text:
-            continue
-        try:
-            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-        except ValueError:
-            continue
-        if parsed.tzinfo is None or parsed.utcoffset() is None:
-            continue
-        values.append(parsed.astimezone(UTC))
-    return max(values, default=None)
