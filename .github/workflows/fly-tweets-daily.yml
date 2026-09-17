@@ -108,12 +108,32 @@ jobs:
           "FLYTWEETS_RUNTIME_STATE=$runtimeState" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "FLYTWEETS_CYCLE_RESULT=$result" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
+      - name: Require Buffer transport configuration
+        env:
+          BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
+          BUFFER_CHANNEL_ID: ${{ secrets.BUFFER_CHANNEL_ID }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:BUFFER_API_KEY) -or [string]::IsNullOrWhiteSpace($env:BUFFER_CHANNEL_ID)) {
+            throw 'Buffer credentials are not configured: BUFFER_API_KEY and BUFFER_CHANNEL_ID are required.'
+          }
+          Write-Output 'BUFFER_TRANSPORT_CONFIGURED=true'
+
       - name: Sync previous generated outbox into durable rows
         run: |
           $ErrorActionPreference = 'Stop'
           & $env:FLYTWEETS_PYTHON scripts/sync_fly_tweet_outbox.py `
             --rows-json $env:FLYTWEETS_ROWS `
             --outbox-jsonl $env:FLYTWEETS_OUTBOX
+
+      - name: Reconcile existing Buffer posts before stats
+        env:
+          BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
+          BUFFER_CHANNEL_ID: ${{ secrets.BUFFER_CHANNEL_ID }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & $env:FLYTWEETS_PYTHON scripts/publish_fly_tweets_buffer.py `
+            --rows-json $env:FLYTWEETS_ROWS
 
       - name: Prepare metrics targets
         run: |
@@ -202,7 +222,17 @@ jobs:
             --rows-json $env:FLYTWEETS_ROWS `
             --outbox-jsonl $env:FLYTWEETS_OUTBOX
 
+      - name: Schedule newly generated posts in Buffer
+        env:
+          BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
+          BUFFER_CHANNEL_ID: ${{ secrets.BUFFER_CHANNEL_ID }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & $env:FLYTWEETS_PYTHON scripts/publish_fly_tweets_buffer.py `
+            --rows-json $env:FLYTWEETS_ROWS
+
       - name: Deliver health alert when required
+        if: always()
         env:
           FLYTWEETS_ALERT_TO: ${{ secrets.FLYTWEETS_ALERT_TO }}
           FLYTWEETS_SMTP_SERVER: ${{ secrets.FLYTWEETS_SMTP_SERVER }}
@@ -211,6 +241,10 @@ jobs:
           FLYTWEETS_SMTP_PASSWORD: ${{ secrets.FLYTWEETS_SMTP_PASSWORD }}
         run: |
           $ErrorActionPreference = 'Stop'
+          if (-not (Test-Path $env:FLYTWEETS_CYCLE_RESULT)) {
+            Write-Output 'No cycle result exists; earlier infrastructure/transport step failed.'
+            exit 0
+          }
           $cycle = Get-Content -Raw $env:FLYTWEETS_CYCLE_RESULT | ConvertFrom-Json
           $alerts = @($cycle.alerts)
           if ($alerts.Count -eq 0) {
