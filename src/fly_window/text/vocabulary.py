@@ -177,10 +177,9 @@ class FlyVocabulary:
         return self.tokens[token_id]
 
 
-
 def build_v1_vocabulary() -> FlyVocabulary:
     general = _unique_words(
-        _GENERAL_SOURCE,
+        "see " + _GENERAL_SOURCE,
         excluded=set(SPECIAL_TOKENS) | set(SYMBOL_TOKENS),
     )[:320]
     if len(general) != 320:
