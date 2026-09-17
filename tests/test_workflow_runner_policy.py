@@ -89,3 +89,27 @@ def test_daily_worker_reconciles_and_schedules_buffer_delivery():
     assert "BUFFER_CHANNEL_ID: ${{ secrets.BUFFER_CHANNEL_ID }}" in text
     assert "BUFFER_ORGANIZATION_ID: ${{ secrets.BUFFER_ORGANIZATION_ID }}" in text
     assert "Buffer credentials are not configured" in text
+
+
+def test_daily_worker_exports_non_sensitive_health_heartbeat():
+    text = (WORKFLOW_DIR / "fly-tweets-daily.yml").read_text(encoding="utf-8")
+
+    assert "fly-tweets-health-heartbeat" in text
+    assert "last_training_at" in text
+    assert "queue_horizon_at" in text
+    assert "last_stats_at" in text
+    assert "health-heartbeat.json" in text
+    assert "actions/upload-artifact@v4" in text
+
+
+def test_hosted_watchdog_survives_native_runner_failure_and_emails_after_week_without_training():
+    text = (WORKFLOW_DIR / "fly-tweets-watchdog.yml").read_text(encoding="utf-8")
+
+    assert "runs-on: ubuntu-latest" in text
+    assert "fly-tweets-daily.yml" in text
+    assert "fly-tweets-health-heartbeat" in text
+    assert "7 * 24 * 60 * 60" in text
+    assert "48 * 60 * 60" in text
+    assert "FLYTWEETS_SMTP_SERVER" in text
+    assert "FLYTWEETS_SMTP_PASSWORD" in text
+    assert "WATCHDOG_DISABLED_CREDENTIALS=true" in text
