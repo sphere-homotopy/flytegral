@@ -151,32 +151,55 @@ def load_cook_sequences(
     return sequences
 
 
+def _validated_sequence_batch(
+    sequences: Sequence[Sequence[int]],
+) -> tuple[list[tuple[int, ...]], int]:
+    if not sequences:
+        raise ValueError("sequences must not be empty")
+    normalized = [tuple(int(token) for token in sequence) for sequence in sequences]
+    if any(len(sequence) < 2 for sequence in normalized):
+        raise ValueError("each training sequence must contain at least two tokens")
+    return normalized, max(len(sequence) - 1 for sequence in normalized)
+
+
 def teacher_forcing_loss(
     policy: FlyTextPolicy,
     sequences: Sequence[Sequence[int]],
 ) -> torch.Tensor:
-    """Mean next-token cross-entropy while preserving the fly state through each sequence."""
-    if not sequences:
-        raise ValueError("sequences must not be empty")
-
-    losses: list[torch.Tensor] = []
+    """Token-weighted next-token CE using one recurrent pass per batch timestep."""
+    normalized, max_steps = _validated_sequence_batch(sequences)
     device = policy.input_gain.device
+    batch_size = len(normalized)
+    state = policy.initial_state(batch_size=batch_size)
+    loss_sum = torch.zeros((), dtype=policy.input_gain.dtype, device=device)
+    target_count = 0
 
-    for sequence in sequences:
-        if len(sequence) < 2:
-            raise ValueError("each training sequence must contain at least two tokens")
+    for step in range(max_steps):
+        active = torch.tensor(
+            [step < len(sequence) - 1 for sequence in normalized],
+            dtype=torch.bool,
+            device=device,
+        )
+        input_ids = torch.tensor(
+            [sequence[step] if step < len(sequence) - 1 else 0 for sequence in normalized],
+            dtype=torch.long,
+            device=device,
+        )
+        targets = torch.tensor(
+            [sequence[step + 1] if step < len(sequence) - 1 else 0 for sequence in normalized],
+            dtype=torch.long,
+            device=device,
+        )
+        output = policy.step(input_ids, state)
+        loss_sum = loss_sum + F.cross_entropy(
+            output.logits[active], targets[active], reduction="sum"
+        )
+        target_count += int(active.sum().item())
+        state = output.state
 
-        state = policy.initial_state(batch_size=1)
-        for input_token, target_token in zip(sequence[:-1], sequence[1:], strict=True):
-            token_ids = torch.tensor([int(input_token)], dtype=torch.long, device=device)
-            target = torch.tensor([int(target_token)], dtype=torch.long, device=device)
-            output = policy.step(token_ids, state)
-            losses.append(F.cross_entropy(output.logits, target))
-            state = output.state
-
-    if not losses:
+    if target_count == 0:
         raise ValueError("sequences did not contain any prediction targets")
-    return torch.stack(losses).mean()
+    return loss_sum / target_count
 
 
 def scheduled_sampling_loss(
@@ -186,44 +209,59 @@ def scheduled_sampling_loss(
     teacher_probability: float,
     seed: int,
 ) -> torch.Tensor:
-    """Next-token loss with deterministic scheduled sampling of the fly's own prefixes."""
-    if not sequences:
-        raise ValueError("sequences must not be empty")
+    """Batched next-token CE with deterministic sampling of the fly's own prefixes."""
     if not 0.0 <= teacher_probability <= 1.0:
         raise ValueError("teacher_probability must lie in [0, 1]")
+    normalized, max_steps = _validated_sequence_batch(sequences)
 
     chooser = random.Random(seed)
     sampler = torch.Generator(device="cpu")
     sampler.manual_seed(int(seed))
     device = policy.input_gain.device
-    losses: list[torch.Tensor] = []
+    batch_size = len(normalized)
+    state = policy.initial_state(batch_size=batch_size)
+    input_ids = torch.tensor(
+        [sequence[0] for sequence in normalized], dtype=torch.long, device=device
+    )
+    loss_sum = torch.zeros((), dtype=policy.input_gain.dtype, device=device)
+    target_count = 0
 
-    for sequence in sequences:
-        if len(sequence) < 2:
-            raise ValueError("each training sequence must contain at least two tokens")
+    for step in range(max_steps):
+        active_flags = [step < len(sequence) - 1 for sequence in normalized]
+        active = torch.tensor(active_flags, dtype=torch.bool, device=device)
+        targets = torch.tensor(
+            [sequence[step + 1] if is_active else 0 for sequence, is_active in zip(normalized, active_flags, strict=True)],
+            dtype=torch.long,
+            device=device,
+        )
+        output = policy.step(input_ids, state)
+        loss_sum = loss_sum + F.cross_entropy(
+            output.logits[active], targets[active], reduction="sum"
+        )
+        target_count += int(active.sum().item())
+        state = output.state
 
-        state = policy.initial_state(batch_size=1)
-        input_token = int(sequence[0])
-        targets = sequence[1:]
-        for target_index, teacher_token in enumerate(targets):
-            token_ids = torch.tensor([input_token], dtype=torch.long, device=device)
-            target = torch.tensor([int(teacher_token)], dtype=torch.long, device=device)
-            output = policy.step(token_ids, state)
-            losses.append(F.cross_entropy(output.logits, target))
-            state = output.state
+        if step + 1 >= max_steps:
+            continue
 
-            if target_index + 1 < len(targets):
-                probabilities = torch.softmax(output.logits.detach(), dim=-1).cpu()[0]
-                sampled_token = int(
-                    torch.multinomial(probabilities, 1, generator=sampler).item()
-                )
-                input_token = choose_next_input(
-                    teacher_token=int(teacher_token),
-                    sampled_token=sampled_token,
+        probabilities = torch.softmax(output.logits.detach(), dim=-1).cpu()
+        sampled_ids = torch.multinomial(probabilities, 1, generator=sampler).squeeze(1).tolist()
+        next_inputs: list[int] = []
+        for index, sequence in enumerate(normalized):
+            has_next_prediction = step + 1 < len(sequence) - 1
+            if not has_next_prediction:
+                next_inputs.append(0)
+                continue
+            next_inputs.append(
+                choose_next_input(
+                    teacher_token=sequence[step + 1],
+                    sampled_token=int(sampled_ids[index]),
                     teacher_probability=teacher_probability,
                     draw=chooser.random(),
                 )
+            )
+        input_ids = torch.tensor(next_inputs, dtype=torch.long, device=device)
 
-    if not losses:
+    if target_count == 0:
         raise ValueError("sequences did not contain any prediction targets")
-    return torch.stack(losses).mean()
+    return loss_sum / target_count
