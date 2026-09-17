@@ -50,31 +50,51 @@ jobs:
           Write-Output "FLYTEGRAL_RUNTIME=$runtimeRoot"
           Write-Output 'FLYTEGRAL_PC_RUNNER=true'
 
-      - name: Queue legacy runtime migration once
+      - name: Recover native bootstrap chain idempotently
         run: |
           $ErrorActionPreference = 'Stop'
           $repo = 'sphere-homotopy/flytegral'
-          $workflow = 'fly-tweets-migrate-legacy-runtime.yml'
           $branch = 'feature/fly-tweets-v1'
+          $migrationWorkflow = 'fly-tweets-migrate-legacy-runtime.yml'
+          $pretrainWorkflow = 'fly-tweets-initial-pretrain.yml'
 
           gh auth status --hostname github.com | Out-Host
-          if ($LASTEXITCODE -ne 0) { throw 'GitHub CLI authentication is unavailable for migration dispatch.' }
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub CLI authentication is unavailable for bootstrap recovery.' }
 
-          $runsRaw = gh run list -R $repo --workflow $workflow --branch $branch --limit 20 --json databaseId,status,conclusion,createdAt
-          if ($LASTEXITCODE -ne 0) { throw 'Could not inspect existing migration runs.' }
-          $runs = @($runsRaw | ConvertFrom-Json)
-          $active = @($runs | Where-Object { $_.status -ne 'completed' })
-          if ($active.Count -gt 0) {
-            Write-Output "MIGRATION_ALREADY_ACTIVE=$($active[0].databaseId)"
+          $migrationRaw = gh run list -R $repo --workflow $migrationWorkflow --branch $branch --limit 20 --json databaseId,status,conclusion,createdAt
+          if ($LASTEXITCODE -ne 0) { throw 'Could not inspect migration runs.' }
+          $migrationRuns = @($migrationRaw | ConvertFrom-Json)
+          $migrationActive = @($migrationRuns | Where-Object { $_.status -ne 'completed' })
+          if ($migrationActive.Count -gt 0) {
+            Write-Output "MIGRATION_ALREADY_ACTIVE=$($migrationActive[0].databaseId)"
             exit 0
           }
 
-          $successful = @($runs | Where-Object { $_.status -eq 'completed' -and $_.conclusion -eq 'success' })
-          if ($successful.Count -gt 0) {
-            Write-Output "MIGRATION_ALREADY_SUCCEEDED=$($successful[0].databaseId)"
+          $migrationSuccessful = @($migrationRuns | Where-Object { $_.status -eq 'completed' -and $_.conclusion -eq 'success' })
+          if ($migrationSuccessful.Count -eq 0) {
+            gh workflow run $migrationWorkflow -R $repo --ref $branch
+            if ($LASTEXITCODE -ne 0) { throw 'Failed to dispatch Fly Tweets runtime migration.' }
+            Write-Output 'MIGRATION_DISPATCHED=true'
             exit 0
           }
 
-          gh workflow run $workflow -R $repo --ref $branch
-          if ($LASTEXITCODE -ne 0) { throw 'Failed to dispatch Fly Tweets runtime migration.' }
-          Write-Output 'MIGRATION_DISPATCHED=true'
+          Write-Output "MIGRATION_ALREADY_SUCCEEDED=$($migrationSuccessful[0].databaseId)"
+
+          $pretrainRaw = gh run list -R $repo --workflow $pretrainWorkflow --branch $branch --limit 20 --json databaseId,status,conclusion,createdAt
+          if ($LASTEXITCODE -ne 0) { throw 'Could not inspect initial-pretrain runs.' }
+          $pretrainRuns = @($pretrainRaw | ConvertFrom-Json)
+          $pretrainActive = @($pretrainRuns | Where-Object { $_.status -ne 'completed' })
+          if ($pretrainActive.Count -gt 0) {
+            Write-Output "PRETRAIN_ALREADY_ACTIVE=$($pretrainActive[0].databaseId)"
+            exit 0
+          }
+
+          $pretrainSuccessful = @($pretrainRuns | Where-Object { $_.status -eq 'completed' -and $_.conclusion -eq 'success' })
+          if ($pretrainSuccessful.Count -gt 0) {
+            Write-Output "PRETRAIN_ALREADY_SUCCEEDED=$($pretrainSuccessful[0].databaseId)"
+            exit 0
+          }
+
+          gh workflow run $pretrainWorkflow -R $repo --ref $branch
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to recover initial Fly Tweets pretraining.' }
+          Write-Output 'PRETRAIN_RECOVERY_DISPATCHED=true'
