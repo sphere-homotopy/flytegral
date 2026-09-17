@@ -29,6 +29,7 @@ def test_daily_training_cli_exposes_durable_transaction_inputs():
         "--run-root",
         "--reward-config",
         "--training-config",
+        "--cadence-training-config",
         "--base-seed",
     ):
         assert option in result.stdout
