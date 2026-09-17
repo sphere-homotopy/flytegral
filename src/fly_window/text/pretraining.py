@@ -28,6 +28,7 @@ class TextTrainingConfig:
     gradient_clip_norm: float
     max_oov_fraction: float
     stage_c_teacher_probability: float
+    heldout_fraction: float = 0.1
 
     def __post_init__(self) -> None:
         if self.curriculum_examples <= 0:
@@ -46,6 +47,8 @@ class TextTrainingConfig:
             raise ValueError("max_oov_fraction must lie in [0, 1]")
         if not 0.0 <= self.stage_c_teacher_probability <= 1.0:
             raise ValueError("stage_c_teacher_probability must lie in [0, 1]")
+        if not 0.0 < self.heldout_fraction < 1.0:
+            raise ValueError("heldout_fraction must lie in (0, 1)")
 
     @classmethod
     def from_json(cls, path: Path) -> "TextTrainingConfig":
@@ -65,6 +68,7 @@ class TextTrainingConfig:
                 gradient_clip_norm=float(payload["gradient_clip_norm"]),
                 max_oov_fraction=float(payload["max_oov_fraction"]),
                 stage_c_teacher_probability=float(payload["stage_c_teacher_probability"]),
+                heldout_fraction=float(payload.get("heldout_fraction", 0.1)),
             )
         except KeyError as error:
             raise ValueError(f"text training config missing {error.args[0]}") from error
@@ -151,6 +155,28 @@ def load_cook_sequences(
     return sequences
 
 
+def split_train_heldout(
+    sequences: Sequence[Sequence[int]],
+    *,
+    heldout_fraction: float,
+    seed: int,
+) -> tuple[list[tuple[int, ...]], list[tuple[int, ...]]]:
+    if not 0.0 < heldout_fraction < 1.0:
+        raise ValueError("heldout_fraction must lie in (0, 1)")
+    normalized = [tuple(int(token) for token in sequence) for sequence in sequences]
+    if len(normalized) < 2:
+        raise ValueError("corpus must contain at least two sequences for a held-out split")
+
+    indices = list(range(len(normalized)))
+    random.Random(seed).shuffle(indices)
+    heldout_count = round(len(indices) * heldout_fraction)
+    heldout_count = max(1, min(len(indices) - 1, heldout_count))
+    heldout_indices = set(indices[:heldout_count])
+    train = [sequence for index, sequence in enumerate(normalized) if index not in heldout_indices]
+    heldout = [sequence for index, sequence in enumerate(normalized) if index in heldout_indices]
+    return train, heldout
+
+
 def _validated_sequence_batch(
     sequences: Sequence[Sequence[int]],
 ) -> tuple[list[tuple[int, ...]], int]:
@@ -230,7 +256,10 @@ def scheduled_sampling_loss(
         active_flags = [step < len(sequence) - 1 for sequence in normalized]
         active = torch.tensor(active_flags, dtype=torch.bool, device=device)
         targets = torch.tensor(
-            [sequence[step + 1] if is_active else 0 for sequence, is_active in zip(normalized, active_flags, strict=True)],
+            [
+                sequence[step + 1] if is_active else 0
+                for sequence, is_active in zip(normalized, active_flags, strict=True)
+            ],
             dtype=torch.long,
             device=device,
         )
@@ -245,7 +274,9 @@ def scheduled_sampling_loss(
             continue
 
         probabilities = torch.softmax(output.logits.detach(), dim=-1).cpu()
-        sampled_ids = torch.multinomial(probabilities, 1, generator=sampler).squeeze(1).tolist()
+        sampled_ids = (
+            torch.multinomial(probabilities, 1, generator=sampler).squeeze(1).tolist()
+        )
         next_inputs: list[int] = []
         for index, sequence in enumerate(normalized):
             has_next_prediction = step + 1 < len(sequence) - 1
