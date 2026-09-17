@@ -6,6 +6,7 @@ HEAVY_FLY_TWEETS_WORKFLOWS = (
     "fly-tweets-cook-corpus.yml",
     "fly-tweets-initial-pretrain.yml",
     "fly-tweets-migrate-legacy-runtime.yml",
+    "fly-tweets-daily.yml",
     "pc-runner-probe.yml",
 )
 EXPECTED_SELF_HOSTED_RUNNER = "runs-on: [self-hosted, windows, x64, flytegral-pc]"
@@ -42,3 +43,18 @@ def test_native_bootstrap_chain_dispatches_each_next_stage_idempotently():
     assert "gh run list" in migration
     assert "fly-tweets-initial-pretrain.yml" in migration
     assert "gh workflow run $workflow" in migration
+
+
+def test_daily_worker_is_native_headless_and_cadence_owned():
+    text = (WORKFLOW_DIR / "fly-tweets-daily.yml").read_text(encoding="utf-8")
+
+    assert "schedule:" in text
+    assert EXPECTED_SELF_HOSTED_RUNNER in text
+    assert "-NoProfile -NonInteractive" in text
+    assert "run_daily_text_training.py" in text
+    assert "--cadence-checkpoint" in text
+    assert "--runtime-state" in text
+    assert "--runtime-config" in text
+    assert "--generation-count" not in text
+    assert "collect-fly-tweet-stats.js" in text
+    assert "continue-on-error: true" in text
