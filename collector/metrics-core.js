@@ -53,8 +53,27 @@ function parseMetricAriaLabel(label) {
   return result;
 }
 
+
+function xProfileHrefMatchesExpectedHandle(href, expectedHandle) {
+  const normalizedHandle = String(expectedHandle || '').trim().replace(/^@/, '').toLowerCase();
+  if (!/^[a-z0-9_]{1,15}$/.test(normalizedHandle)) {
+    throw new Error(`invalid expected X handle: ${expectedHandle}`);
+  }
+
+  let pathname;
+  try {
+    pathname = new URL(String(href || ''), 'https://x.com').pathname;
+  } catch {
+    return false;
+  }
+
+  const parts = pathname.split('/').filter(Boolean);
+  return parts.length === 1 && parts[0].toLowerCase() === normalizedHandle;
+}
+
 module.exports = {
   metricsCollectorLaunchOptions,
   parseCompactCount,
   parseMetricAriaLabel,
+  xProfileHrefMatchesExpectedHandle,
 };
