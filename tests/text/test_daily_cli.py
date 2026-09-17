@@ -21,6 +21,7 @@ def test_daily_training_cli_exposes_durable_transaction_inputs():
         "--attempt",
         "--current-checkpoint",
         "--anchor-checkpoint",
+        "--cadence-checkpoint",
         "--runtime-state",
         "--runtime-config",
         "--rows-json",
@@ -28,9 +29,8 @@ def test_daily_training_cli_exposes_durable_transaction_inputs():
         "--run-root",
         "--reward-config",
         "--training-config",
+        "--cadence-training-config",
         "--base-seed",
     ):
         assert option in result.stdout
-    assert "--cadence-checkpoint" not in result.stdout
-    assert "--cadence-training-config" not in result.stdout
     assert "--generation-count" not in result.stdout
