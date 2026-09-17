@@ -50,26 +50,3 @@ jobs:
         run: python scripts/evaluate.py --help > /dev/null
       - name: Smoke benchmark CLI
         run: python scripts/benchmark_policy.py --help > /dev/null
-
-  pc-probe:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/feature/fly-tweets-v1'
-    runs-on: [self-hosted, windows, x64, life-supervisor-pc]
-    timeout-minutes: 3
-    defaults:
-      run:
-        shell: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ". '{0}'"
-    steps:
-      - name: Probe X collector prerequisites
-        run: |
-          $ErrorActionPreference = 'Stop'
-          Write-Output "COMPUTER=$env:COMPUTERNAME"
-          Write-Output "USER=$env:USERNAME"
-          Write-Output "NODE=$((Get-Command node -ErrorAction SilentlyContinue).Source)"
-          Write-Output "NPM=$((Get-Command npm -ErrorAction SilentlyContinue).Source)"
-          Write-Output "PYTHON=$((Get-Command python -ErrorAction SilentlyContinue).Source)"
-          $legacyProfile = 'C:\tools\x-stats\x-browser-profile'
-          Write-Output "LEGACY_X_PROFILE_EXISTS=$(Test-Path $legacyProfile)"
-          if (Test-Path $legacyProfile) {
-            Write-Output "LEGACY_X_PROFILE_ITEMS=$(@(Get-ChildItem -Force $legacyProfile -ErrorAction SilentlyContinue).Count)"
-          }
-          Write-Output 'FLYTWEETS_PC_RUNNER=true'
