@@ -345,13 +345,16 @@ def run_daily_update(
     now: datetime,
     write_checkpoint: CheckpointWriter,
     append_rows: RowsAppender,
+    generation_count: int = 10,
 ) -> DailyRunResult:
     """Run one logically atomic Fly Tweets learning/generation transaction.
 
     The model is rolled back on any downstream failure. Training source rows are not
-    marked consumed until both the immutable checkpoint write and idempotent Sheet
+    marked consumed until both the immutable checkpoint write and idempotent queue
     append have succeeded. A checkpoint created before a later failure may remain as
     an unreferenced immutable artifact; it is never treated as deployed by this call.
+    The caller supplies the fly-selected generation count; this function does not
+    impose a normal tweets-per-day cadence.
     """
     checkpoint = str(checkpoint_id).strip()
     batch = str(batch_id).strip()
@@ -362,6 +365,8 @@ def run_daily_update(
         raise ValueError("batch_id is required")
     if not sha:
         raise ValueError("git_sha is required")
+    if isinstance(generation_count, bool) or not isinstance(generation_count, int) or generation_count <= 0:
+        raise ValueError("generation_count must be a positive integer")
     if now.tzinfo is None or now.utcoffset() is None:
         raise ValueError("now must be timezone-aware")
 
@@ -402,6 +407,7 @@ def run_daily_update(
             "final_anchor_kl": stats.final_anchor_kl,
             "consumed_keys": list(consumed_keys),
             "completed_at": now.isoformat(),
+            "generated_count": generation_count,
             "llm_in_training_path": False,
             "recurrent_connectome_trainable": bool(policy.recurrent.requires_grad),
         }
@@ -415,13 +421,13 @@ def run_daily_update(
             checkpoint_id=checkpoint,
             git_sha=sha,
             batch_id=batch,
-            count=10,
+            count=generation_count,
         )
         generated_rows = [
             generated_tweet_row(tweet, generated_at=now) for tweet in generated
         ]
-        if len(generated_rows) != 10:
-            raise RuntimeError("daily update must generate exactly 10 Sheet rows")
+        if len(generated_rows) != generation_count:
+            raise RuntimeError("daily update generated an unexpected queue row count")
         append_rows(generated_rows)
 
         consumed_at = now.isoformat()
