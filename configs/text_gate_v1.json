@@ -1,0 +1,10 @@
+{
+  "max_heldout_loss": 6.5,
+  "min_eos_rate": 0.95,
+  "max_repeat_run": 4,
+  "min_non_degenerate_rate": 0.95,
+  "min_median_chars": 20,
+  "max_median_chars": 220,
+  "probe_max_tokens": 96,
+  "temperature": 0.9
+}
