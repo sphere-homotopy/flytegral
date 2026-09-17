@@ -138,15 +138,9 @@ def _load_runtime_state(path: Path) -> RuntimeState:
     return RuntimeState(
         started_at=_parse_datetime(payload.get("started_at"), field="started_at"),
         last_stats_at=_parse_datetime(payload.get("last_stats_at"), field="last_stats_at"),
-        last_training_at=_parse_datetime(
-            payload.get("last_training_at"), field="last_training_at"
-        ),
-        last_generation_at=_parse_datetime(
-            payload.get("last_generation_at"), field="last_generation_at"
-        ),
-        queue_horizon_at=_parse_datetime(
-            payload.get("queue_horizon_at"), field="queue_horizon_at"
-        ),
+        last_training_at=_parse_datetime(payload.get("last_training_at"), field="last_training_at"),
+        last_generation_at=_parse_datetime(payload.get("last_generation_at"), field="last_generation_at"),
+        queue_horizon_at=_parse_datetime(payload.get("queue_horizon_at"), field="queue_horizon_at"),
         current_checkpoint=str(payload.get("current_checkpoint", "") or ""),
         last_alert_at=_parse_datetime(payload.get("last_alert_at"), field="last_alert_at"),
     )
@@ -156,15 +150,9 @@ def _write_runtime_state(path: Path, state: RuntimeState) -> None:
     payload = {
         "started_at": None if state.started_at is None else state.started_at.isoformat(),
         "last_stats_at": None if state.last_stats_at is None else state.last_stats_at.isoformat(),
-        "last_training_at": (
-            None if state.last_training_at is None else state.last_training_at.isoformat()
-        ),
-        "last_generation_at": (
-            None if state.last_generation_at is None else state.last_generation_at.isoformat()
-        ),
-        "queue_horizon_at": (
-            None if state.queue_horizon_at is None else state.queue_horizon_at.isoformat()
-        ),
+        "last_training_at": None if state.last_training_at is None else state.last_training_at.isoformat(),
+        "last_generation_at": None if state.last_generation_at is None else state.last_generation_at.isoformat(),
+        "queue_horizon_at": None if state.queue_horizon_at is None else state.queue_horizon_at.isoformat(),
         "current_checkpoint": state.current_checkpoint,
         "last_alert_at": None if state.last_alert_at is None else state.last_alert_at.isoformat(),
     }
@@ -250,8 +238,7 @@ def _parser() -> argparse.ArgumentParser:
         description=(
             "Run one durable no-LLM Fly Tweets cycle. MaleCNS cadence owns both "
             "publication count and absolute publish times. Fresh settled engagement "
-            "updates text and cadence policies when available; missing stats never "
-            "block generation."
+            "updates text and cadence policies when available; missing stats never block generation."
         )
     )
     parser.add_argument("--request-date", required=True, help="Scheduled occurrence date, YYYY-MM-DD")
@@ -266,18 +253,14 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--run-root", type=Path, required=True)
     parser.add_argument("--reward-config", type=Path, required=True)
     parser.add_argument("--training-config", type=Path, required=True)
-    parser.add_argument("--cadence-training-config", type=Path, required=True)
+    parser.add_argument(
+        "--cadence-training-config",
+        type=Path,
+        default=Path("configs/cadence_training_v1.json"),
+    )
     parser.add_argument("--base-seed", type=int, required=True)
-    parser.add_argument(
-        "--graph-npz",
-        type=Path,
-        default=Path("artifacts/graphs/subgraph_v1.npz"),
-    )
-    parser.add_argument(
-        "--nodes-parquet",
-        type=Path,
-        default=Path("artifacts/graphs/subgraph_v1_nodes.parquet"),
-    )
+    parser.add_argument("--graph-npz", type=Path, default=Path("artifacts/graphs/subgraph_v1.npz"))
+    parser.add_argument("--nodes-parquet", type=Path, default=Path("artifacts/graphs/subgraph_v1_nodes.parquet"))
     parser.add_argument("--temperature", type=float, default=0.9)
     parser.add_argument("--max-tokens", type=int, default=96)
     parser.add_argument("--max-chars", type=int, default=240)
@@ -324,7 +307,7 @@ def main() -> None:
     device = _resolve_device(args.device)
     current_checkpoint = _load_checkpoint(args.current_checkpoint, device)
     anchor_checkpoint = _load_checkpoint(args.anchor_checkpoint, device)
-    cadence_checkpoint = _load_checkpoint(args.cadence_checkpoint, device)
+    initial_cadence_checkpoint = _load_checkpoint(args.cadence_checkpoint, device)
 
     policy, vocabulary = _build_policy(
         current_checkpoint,
@@ -341,8 +324,13 @@ def main() -> None:
     if anchor_vocabulary.tokens != vocabulary.tokens:
         raise ValueError("current and anchor checkpoint vocabularies differ")
 
+    cadence_source = (
+        current_checkpoint
+        if isinstance(current_checkpoint.get("cadence_state_dict"), dict)
+        else initial_cadence_checkpoint
+    )
     cadence_policy, cadence_temperature, cadence_max_posts = _build_cadence_policy(
-        cadence_checkpoint,
+        cadence_source,
         graph_npz=args.graph_npz,
         nodes_parquet=args.nodes_parquet,
         device=device,
@@ -363,9 +351,7 @@ def main() -> None:
     occurrence = request_date.isoformat()
     next_checkpoint_id = f"daily-{occurrence}-a{args.attempt}"
     batch_id = f"batch-{occurrence}-a{args.attempt}"
-    current_checkpoint_id = runtime_state.current_checkpoint.strip() or _checkpoint_label(
-        args.current_checkpoint
-    )
+    current_checkpoint_id = runtime_state.current_checkpoint.strip() or _checkpoint_label(args.current_checkpoint)
     run_dir = args.run_root / next_checkpoint_id
 
     def write_checkpoint(updated_policy, updated_cadence, written_checkpoint_id, manifest):
@@ -462,11 +448,7 @@ def main() -> None:
                 "runtime_state": str(args.runtime_state),
                 "outbox": str(args.outbox_jsonl),
                 "alerts": [
-                    {
-                        "code": alert.code,
-                        "message": alert.message,
-                        "urgent": alert.urgent,
-                    }
+                    {"code": alert.code, "message": alert.message, "urgent": alert.urgent}
                     for alert in alerts
                 ],
                 "llm_in_runtime": False,
