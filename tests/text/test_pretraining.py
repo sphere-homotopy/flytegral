@@ -8,6 +8,7 @@ from fly_window.text.policy import FlyTextPolicy
 from fly_window.text.pretraining import (
     TextTrainingConfig,
     choose_next_input,
+    limit_corpus_sequences,
     load_cook_sequences,
     scheduled_sampling_loss,
     teacher_forcing_loss,
@@ -91,6 +92,22 @@ def test_load_cook_sequences_filters_provenance_and_deduplicates(tmp_path):
     assert len(sequences) == 1
     tokens = tuple(vocabulary.token_for(token_id) for token_id in sequences[0])
     assert tokens == ("<BOS>", "the", "theorem", "is", "true", ".", "<EOS>")
+
+
+def test_bounded_corpus_sampling_is_exact_deterministic_and_order_stable():
+    sequences = [(index, index + 1000) for index in range(100)]
+
+    first = limit_corpus_sequences(sequences, max_sequences=20, seed=260917)
+    replay = limit_corpus_sequences(sequences, max_sequences=20, seed=260917)
+    alternate = limit_corpus_sequences(sequences, max_sequences=20, seed=260918)
+
+    assert first == replay
+    assert first != alternate
+    assert len(first) == 20
+    assert first == sorted(first, key=lambda sequence: sequence[0])
+    assert set(first).issubset(set(sequences))
+    assert limit_corpus_sequences(sequences, max_sequences=None, seed=1) == sequences
+    assert limit_corpus_sequences(sequences[:10], max_sequences=20, seed=1) == sequences[:10]
 
 
 def test_teacher_forcing_loss_backpropagates_through_fly_text_interface():
@@ -224,6 +241,7 @@ def test_text_training_config_round_trips_and_validates(tmp_path):
                 "gradient_clip_norm": 1.0,
                 "max_oov_fraction": 0.35,
                 "stage_c_teacher_probability": 0.7,
+                "max_corpus_sequences": 256,
             }
         ),
         encoding="utf-8",
@@ -235,6 +253,7 @@ def test_text_training_config_round_trips_and_validates(tmp_path):
     assert config.curriculum_examples == 12000
     assert config.stage_b_epochs == 3
     assert config.stage_c_teacher_probability == 0.7
+    assert config.max_corpus_sequences == 256
 
     path.write_text(
         json.dumps(
