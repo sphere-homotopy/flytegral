@@ -9,13 +9,24 @@ from fly_window.text.pretraining import (
     TextTrainingConfig,
     choose_next_input,
     load_cook_sequences,
+    scheduled_sampling_loss,
     teacher_forcing_loss,
 )
 from fly_window.text.vocabulary import build_v1_vocabulary
 
 
-def _toy_policy(vocab_size: int) -> FlyTextPolicy:
-    graph = ConnectomeGraph(
+class _CountingTextPolicy(FlyTextPolicy):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.step_calls = 0
+
+    def step(self, token_ids: torch.Tensor, state: torch.Tensor):
+        self.step_calls += 1
+        return super().step(token_ids, state)
+
+
+def _toy_graph() -> ConnectomeGraph:
+    return ConnectomeGraph(
         body_ids=np.asarray([10, 20, 30], dtype=np.int64),
         src_idx=np.asarray([0, 1], dtype=np.int64),
         dst_idx=np.asarray([1, 2], dtype=np.int64),
@@ -24,7 +35,23 @@ def _toy_policy(vocab_size: int) -> FlyTextPolicy:
         output_mask=np.asarray([False, False, True], dtype=np.bool_),
         transmitter_sign=np.asarray([1.0, 1.0, 1.0], dtype=np.float32),
     )
+
+
+def _toy_policy(vocab_size: int) -> FlyTextPolicy:
+    graph = _toy_graph()
     return FlyTextPolicy(
+        graph,
+        to_sparse_recurrent(graph),
+        vocab_size=vocab_size,
+        sensory_dim=8,
+        microsteps=2,
+        leak=0.5,
+    )
+
+
+def _counting_policy(vocab_size: int) -> _CountingTextPolicy:
+    graph = _toy_graph()
+    return _CountingTextPolicy(
         graph,
         to_sparse_recurrent(graph),
         vocab_size=vocab_size,
@@ -87,6 +114,59 @@ def test_teacher_forcing_loss_backpropagates_through_fly_text_interface():
     assert policy.input_gain.grad is not None
     assert policy.readout.weight.grad is not None
     assert policy.recurrent.requires_grad is False
+
+
+def test_teacher_forcing_batches_variable_length_sequences_by_timestep():
+    vocabulary = build_v1_vocabulary()
+    policy = _counting_policy(len(vocabulary))
+    sequences = [
+        (
+            vocabulary.id_for("<BOS>"),
+            vocabulary.id_for("theorem"),
+            vocabulary.id_for("is"),
+            vocabulary.id_for("true"),
+            vocabulary.id_for("<EOS>"),
+        ),
+        (
+            vocabulary.id_for("<BOS>"),
+            vocabulary.id_for("proof"),
+            vocabulary.id_for("<EOS>"),
+        ),
+    ]
+
+    loss = teacher_forcing_loss(policy, sequences)
+
+    assert torch.isfinite(loss)
+    assert policy.step_calls == 4
+
+
+def test_scheduled_sampling_batches_variable_length_sequences_by_timestep():
+    vocabulary = build_v1_vocabulary()
+    policy = _counting_policy(len(vocabulary))
+    sequences = [
+        (
+            vocabulary.id_for("<BOS>"),
+            vocabulary.id_for("theorem"),
+            vocabulary.id_for("is"),
+            vocabulary.id_for("true"),
+            vocabulary.id_for("<EOS>"),
+        ),
+        (
+            vocabulary.id_for("<BOS>"),
+            vocabulary.id_for("proof"),
+            vocabulary.id_for("<EOS>"),
+        ),
+    ]
+
+    loss = scheduled_sampling_loss(
+        policy,
+        sequences,
+        teacher_probability=0.5,
+        seed=123,
+    )
+
+    assert torch.isfinite(loss)
+    assert policy.step_calls == 4
 
 
 def test_teacher_forcing_loss_rejects_sequences_without_prediction_target():
