@@ -1,0 +1,196 @@
+name: Fly Tweets watchdog
+
+on:
+  schedule:
+    - cron: '47 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: fly-tweets-watchdog
+  cancel-in-progress: true
+
+jobs:
+  watchdog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check monitoring configuration
+        id: config
+        env:
+          FLYTWEETS_ALERT_TO: ${{ secrets.FLYTWEETS_ALERT_TO }}
+          FLYTWEETS_SMTP_SERVER: ${{ secrets.FLYTWEETS_SMTP_SERVER }}
+          FLYTWEETS_SMTP_PORT: ${{ secrets.FLYTWEETS_SMTP_PORT }}
+          FLYTWEETS_SMTP_USER: ${{ secrets.FLYTWEETS_SMTP_USER }}
+          FLYTWEETS_SMTP_PASSWORD: ${{ secrets.FLYTWEETS_SMTP_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          for value in \
+            "$FLYTWEETS_ALERT_TO" \
+            "$FLYTWEETS_SMTP_SERVER" \
+            "$FLYTWEETS_SMTP_PORT" \
+            "$FLYTWEETS_SMTP_USER" \
+            "$FLYTWEETS_SMTP_PASSWORD"; do
+            if [[ -z "$value" ]]; then missing=1; fi
+          done
+          if [[ "$missing" == "1" ]]; then
+            echo 'WATCHDOG_DISABLED_CREDENTIALS=true'
+            echo 'enabled=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo 'enabled=true' >> "$GITHUB_OUTPUT"
+
+      - name: Inspect native daily heartbeat
+        id: inspect
+        if: steps.config.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo='sphere-homotopy/flytegral'
+          workflow='fly-tweets-daily.yml'
+          branch='feature/fly-tweets-v1'
+          stale_training_seconds=$((7 * 24 * 60 * 60))
+          stale_daily_seconds=$((48 * 60 * 60))
+          mkdir -p watchdog
+
+          gh run list -R "$repo" --workflow "$workflow" --branch "$branch" --limit 100 \
+            --json databaseId,status,conclusion,createdAt,updatedAt > watchdog/runs.json
+
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+          from datetime import UTC, datetime, timedelta
+          from pathlib import Path
+
+          runs = json.loads(Path('watchdog/runs.json').read_text(encoding='utf-8'))
+          now = datetime.now(UTC)
+          reasons = []
+
+          def parse(value: str) -> datetime:
+              return datetime.fromisoformat(value.replace('Z', '+00:00')).astimezone(UTC)
+
+          if not runs:
+              print('WATCHDOG_NOT_LAUNCHED=true')
+              with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
+                  out.write('alert=false\n')
+              raise SystemExit(0)
+
+          latest = runs[0]
+          successful = next(
+              (run for run in runs if run.get('status') == 'completed' and run.get('conclusion') == 'success'),
+              None,
+          )
+          if latest.get('status') == 'completed' and latest.get('conclusion') != 'success':
+              reasons.append(
+                  f"latest native daily run {latest['databaseId']} concluded {latest.get('conclusion') or 'unknown'}"
+              )
+
+          if successful is None:
+              reasons.append('no successful native Fly Tweets daily run exists')
+          else:
+              completed_at = parse(successful.get('updatedAt') or successful['createdAt'])
+              if (now - completed_at).total_seconds() > int(os.environ['STALE_DAILY_SECONDS']):
+                  reasons.append(
+                      f"last successful native daily run is older than 48h: {completed_at.isoformat()}"
+                  )
+
+              heartbeat_dir = Path('watchdog/heartbeat')
+              heartbeat_dir.mkdir(parents=True, exist_ok=True)
+              result = subprocess.run(
+                  [
+                      'gh', 'run', 'download', str(successful['databaseId']),
+                      '-R', 'sphere-homotopy/flytegral',
+                      '-n', 'fly-tweets-health-heartbeat',
+                      '-D', str(heartbeat_dir),
+                  ],
+                  text=True,
+                  capture_output=True,
+                  check=False,
+              )
+              heartbeat_path = heartbeat_dir / 'health-heartbeat.json'
+              if result.returncode != 0 or not heartbeat_path.exists():
+                  reasons.append('latest successful native daily run has no readable health heartbeat artifact')
+              else:
+                  heartbeat = json.loads(heartbeat_path.read_text(encoding='utf-8'))
+                  reference = heartbeat.get('last_training_at') or heartbeat.get('training_reference_at')
+                  if not reference:
+                      reasons.append('health heartbeat has no training reference timestamp')
+                  else:
+                      reference_at = parse(str(reference))
+                      if (now - reference_at).total_seconds() > int(os.environ['STALE_TRAINING_SECONDS']):
+                          reasons.append(
+                              f"no successful Fly Tweets retraining for at least 7 days; reference={reference_at.isoformat()}"
+                          )
+
+                  queue_horizon = heartbeat.get('queue_horizon_at')
+                  if not queue_horizon:
+                      reasons.append('health heartbeat has no queue horizon')
+                  else:
+                      horizon_at = parse(str(queue_horizon))
+                      if horizon_at - now < timedelta(hours=24):
+                          reasons.append(
+                              f"scheduled tweet reserve is below 24h; horizon={horizon_at.isoformat()}"
+                          )
+
+          alert_path = Path('watchdog/watchdog-alert.txt')
+          if reasons:
+              body = 'Fly Tweets watchdog detected:\n\n' + '\n'.join(f'- {reason}' for reason in reasons)
+              body += f"\n\nChecked at: {now.isoformat()}"
+              alert_path.write_text(body + '\n', encoding='utf-8')
+              print(body)
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
+              out.write(f"alert={'true' if reasons else 'false'}\n")
+          PY
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STALE_TRAINING_SECONDS: ${{ env.STALE_TRAINING_SECONDS }}
+          STALE_DAILY_SECONDS: ${{ env.STALE_DAILY_SECONDS }}
+
+      - name: Send watchdog email
+        if: steps.config.outputs.enabled == 'true' && steps.inspect.outputs.alert == 'true'
+        env:
+          FLYTWEETS_ALERT_TO: ${{ secrets.FLYTWEETS_ALERT_TO }}
+          FLYTWEETS_SMTP_SERVER: ${{ secrets.FLYTWEETS_SMTP_SERVER }}
+          FLYTWEETS_SMTP_PORT: ${{ secrets.FLYTWEETS_SMTP_PORT }}
+          FLYTWEETS_SMTP_USER: ${{ secrets.FLYTWEETS_SMTP_USER }}
+          FLYTWEETS_SMTP_PASSWORD: ${{ secrets.FLYTWEETS_SMTP_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          import smtplib
+          from email.message import EmailMessage
+          from pathlib import Path
+
+          message = EmailMessage()
+          message['Subject'] = '[Fly Tweets] watchdog alert'
+          message['From'] = os.environ['FLYTWEETS_SMTP_USER']
+          message['To'] = os.environ['FLYTWEETS_ALERT_TO']
+          message.set_content(Path('watchdog/watchdog-alert.txt').read_text(encoding='utf-8'))
+
+          host = os.environ['FLYTWEETS_SMTP_SERVER']
+          port = int(os.environ['FLYTWEETS_SMTP_PORT'])
+          user = os.environ['FLYTWEETS_SMTP_USER']
+          password = os.environ['FLYTWEETS_SMTP_PASSWORD']
+          if port == 465:
+              with smtplib.SMTP_SSL(host, port, timeout=30) as smtp:
+                  smtp.login(user, password)
+                  smtp.send_message(message)
+          else:
+              with smtplib.SMTP(host, port, timeout=30) as smtp:
+                  smtp.ehlo()
+                  smtp.starttls()
+                  smtp.ehlo()
+                  smtp.login(user, password)
+                  smtp.send_message(message)
+          print('WATCHDOG_EMAIL_SENT=true')
+          PY
