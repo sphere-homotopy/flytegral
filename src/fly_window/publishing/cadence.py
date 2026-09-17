@@ -18,6 +18,13 @@ class CadencePolicyOutput:
     activity: torch.Tensor
 
 
+@dataclass(frozen=True, slots=True)
+class CadenceDecision:
+    publish_at: datetime
+    context: tuple[float, float, float, float]
+    action: int
+
+
 class FlyCadencePolicy(nn.Module):
     """MaleCNS policy head for POST/WAIT cadence decisions.
 
@@ -72,8 +79,6 @@ class FlyCadencePolicy(nn.Module):
 
         nn.init.xavier_uniform_(self.input_gain)
         nn.init.xavier_uniform_(self.action_readout.weight)
-        # Zero bias gives STOP and all waits equal prior probability instead of
-        # encoding a fixed tweets/day target.
         nn.init.zeros_(self.action_readout.bias)
 
         self.register_buffer("recurrent", recurrent.coalesce().detach())
@@ -127,7 +132,9 @@ def _require_aware(value: datetime, name: str) -> datetime:
     return value.astimezone(UTC)
 
 
-def _time_context(cursor: datetime, segment_start: datetime, segment_end: datetime) -> tuple[float, ...]:
+def _time_context(
+    cursor: datetime, segment_start: datetime, segment_end: datetime
+) -> tuple[float, float, float, float]:
     segment_seconds = (segment_end - segment_start).total_seconds()
     if segment_seconds <= 0.0:
         raise ValueError("generation segment must be positive")
@@ -144,7 +151,7 @@ def _time_context(cursor: datetime, segment_start: datetime, segment_end: dateti
     return (math.sin(phase), math.cos(phase), progress, remaining)
 
 
-def sample_publish_times(
+def sample_publish_decisions(
     policy: FlyCadencePolicy,
     *,
     start: datetime,
@@ -152,14 +159,8 @@ def sample_publish_times(
     seed: int,
     temperature: float = 1.0,
     max_posts_per_24h: int = 30,
-) -> tuple[datetime, ...]:
-    """Sample fly-owned absolute publication times for a covered horizon.
-
-    The horizon is processed in independent segments of at most 24 hours. This lets
-    a five-day bootstrap represent five daily decisions while a normal refill uses
-    the exact same policy for one additional day. STOP may legitimately produce zero
-    posts in a segment; coverage still advances because the fly made that decision.
-    """
+) -> tuple[CadenceDecision, ...]:
+    """Sample fly-owned publication decisions with training provenance."""
     start_utc = _require_aware(start, "start")
     end_utc = _require_aware(end, "end")
     if end_utc <= start_utc:
@@ -171,7 +172,7 @@ def sample_publish_times(
 
     generator = torch.Generator(device="cpu")
     generator.manual_seed(int(seed))
-    publish_times: list[datetime] = []
+    decisions: list[CadenceDecision] = []
     was_training = policy.training
     policy.eval()
     try:
@@ -184,8 +185,9 @@ def sample_publish_times(
                 segment_posts = 0
 
                 while segment_posts < max_posts_per_24h:
+                    context_values = _time_context(cursor, segment_start, segment_end)
                     context = torch.tensor(
-                        [_time_context(cursor, segment_start, segment_end)],
+                        [context_values],
                         dtype=policy.input_gain.dtype,
                         device=policy.input_gain.device,
                     )
@@ -206,7 +208,13 @@ def sample_publish_times(
                     candidate = cursor + timedelta(minutes=wait_minutes)
                     if candidate >= segment_end:
                         break
-                    publish_times.append(candidate)
+                    decisions.append(
+                        CadenceDecision(
+                            publish_at=candidate,
+                            context=context_values,
+                            action=action,
+                        )
+                    )
                     cursor = candidate
                     segment_posts += 1
 
@@ -214,4 +222,27 @@ def sample_publish_times(
     finally:
         policy.train(was_training)
 
-    return tuple(publish_times)
+    return tuple(decisions)
+
+
+def sample_publish_times(
+    policy: FlyCadencePolicy,
+    *,
+    start: datetime,
+    end: datetime,
+    seed: int,
+    temperature: float = 1.0,
+    max_posts_per_24h: int = 30,
+) -> tuple[datetime, ...]:
+    """Backward-compatible projection of cadence decisions to absolute times."""
+    return tuple(
+        decision.publish_at
+        for decision in sample_publish_decisions(
+            policy,
+            start=start,
+            end=end,
+            seed=seed,
+            temperature=temperature,
+            max_posts_per_24h=max_posts_per_24h,
+        )
+    )
