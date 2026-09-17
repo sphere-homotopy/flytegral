@@ -62,17 +62,26 @@ jobs:
           "FLYTWEETS_GRAPH_NODES=$nodes" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "FLYTWEETS_GRAPH_MANIFEST=$manifest" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Require native Cook corpus
+      - name: Require exact native Cook corpus
         run: |
           $ErrorActionPreference = 'Stop'
+          $expectedRows = 11238
           $corpusDir = Join-Path $env:FLYTEGRAL_RUNTIME 'corpus\john-d-cook'
           $corpus = Join-Path $corpusDir 'cook-math-tweets.jsonl'
           $manifest = Join-Path $corpusDir 'manifest.json'
           if (-not (Test-Path $corpus)) { throw "Cook corpus missing: $corpus" }
           if (-not (Test-Path $manifest)) { throw "Cook corpus manifest missing: $manifest" }
           $rowCount = (Get-Content $corpus | Measure-Object -Line).Lines
-          if ($rowCount -lt 8) { throw "Cook corpus too small: $rowCount rows" }
+          $meta = Get-Content -Raw $manifest | ConvertFrom-Json
+          if ($rowCount -ne $expectedRows) {
+            throw "Cook corpus row count mismatch: expected=$expectedRows actual=$rowCount"
+          }
+          if ([int]$meta.rows -ne $rowCount) {
+            throw "Cook corpus manifest mismatch: manifest=$($meta.rows), actual=$rowCount"
+          }
+          $corpusHash = (Get-FileHash -Algorithm SHA256 $corpus).Hash
           Write-Output "COOK_CORPUS_ROWS=$rowCount"
+          Write-Output "COOK_CORPUS_SHA256=$corpusHash"
           Get-Content $manifest
           "FLYTWEETS_CORPUS=$corpus" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
@@ -130,7 +139,15 @@ jobs:
           $checkpoint = Join-Path $latest.FullName 'checkpoint.pt'
           if (-not (Test-Path $manifest)) { throw "Training manifest missing: $manifest" }
           if (-not (Test-Path $checkpoint)) { throw "Training checkpoint missing: $checkpoint" }
+          Get-Content -Raw $manifest | ConvertFrom-Json | Out-Null
+          $checkpointBytes = (Get-Item $checkpoint).Length
+          if ($checkpointBytes -le 0) { throw 'Training checkpoint is empty' }
+          $manifestHash = (Get-FileHash -Algorithm SHA256 $manifest).Hash
+          $checkpointHash = (Get-FileHash -Algorithm SHA256 $checkpoint).Hash
           Get-Content $manifest
+          Write-Output "TRAINING_MANIFEST_SHA256=$manifestHash"
+          Write-Output "TRAINING_CHECKPOINT_SHA256=$checkpointHash"
+          Write-Output "TRAINING_CHECKPOINT_BYTES=$checkpointBytes"
           "FLYTWEETS_RUN_DIR=$($latest.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "FLYTWEETS_RUN_ID=$($latest.Name)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 

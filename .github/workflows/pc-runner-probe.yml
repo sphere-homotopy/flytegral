@@ -22,15 +22,30 @@ jobs:
       - name: Probe Flytegral runner and X collector prerequisites
         run: |
           $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_NAME -ne 'GEORGII-flytegral-pc') {
+            throw "Unexpected runner: $env:RUNNER_NAME"
+          }
+
+          foreach ($command in @('gh', 'py', 'node', 'npm')) {
+            $resolved = Get-Command $command -ErrorAction SilentlyContinue
+            if (-not $resolved) { throw "Required command missing: $command" }
+            Write-Output "$($command.ToUpper())=$($resolved.Source)"
+          }
+
+          gh auth status --hostname github.com
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub CLI authentication is not healthy for the Flytegral runner user.' }
+          & py -3.12 --version
+          if ($LASTEXITCODE -ne 0) { throw 'Python 3.12 is unavailable through the Windows py launcher.' }
+
+          $xProfile = 'C:\tools\x-stats\x-browser-profile'
+          if (-not (Test-Path $xProfile)) { throw "Persistent X profile missing: $xProfile" }
+          $runtimeRoot = Join-Path $env:LOCALAPPDATA 'flytegral\fly-tweets'
+
+          Write-Output "RUNNER_NAME=$env:RUNNER_NAME"
           Write-Output "COMPUTER=$env:COMPUTERNAME"
           Write-Output "USER=$env:USERNAME"
           Write-Output "PWD=$PWD"
-          Write-Output "NODE=$((Get-Command node -ErrorAction SilentlyContinue).Source)"
-          Write-Output "NPM=$((Get-Command npm -ErrorAction SilentlyContinue).Source)"
-          Write-Output "PYTHON=$((Get-Command python -ErrorAction SilentlyContinue).Source)"
-          $xProfile = 'C:\tools\x-stats\x-browser-profile'
-          $runtimeRoot = Join-Path $env:LOCALAPPDATA 'flytegral\fly-tweets'
-          Write-Output "X_PROFILE_EXISTS=$(Test-Path $xProfile)"
+          Write-Output "X_PROFILE_EXISTS=true"
           Write-Output "X_PROFILE=$xProfile"
           Write-Output "FLYTEGRAL_RUNTIME=$runtimeRoot"
           Write-Output 'FLYTEGRAL_PC_RUNNER=true'
