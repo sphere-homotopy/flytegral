@@ -10,6 +10,7 @@ from fly_window.text.provenance import generated_tweet_record
 
 FLY_TWEET_COLUMNS = (
     "batch_id",
+    "batch_size",
     "tweet_index",
     "idempotency_key",
     "text",
@@ -44,6 +45,7 @@ def generated_tweet_row(
     *,
     generated_at: datetime,
     scheduled_at: datetime | None = None,
+    batch_size: int | None = None,
     cadence_context: Sequence[float] | None = None,
     cadence_action: int | None = None,
 ) -> dict[str, object]:
@@ -69,6 +71,7 @@ def generated_tweet_row(
     provenance = generated_tweet_record(tweet)
     values: dict[str, object] = {
         "batch_id": tweet.batch_id,
+        "batch_size": "" if batch_size is None else batch_size,
         "tweet_index": tweet.tweet_index,
         "idempotency_key": f"{tweet.batch_id}:{tweet.tweet_index}",
         "text": tweet.text,
