@@ -63,7 +63,7 @@ def test_initial_pretrain_is_bounded_and_daily_bootstrap_is_credential_gated():
     assert "BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}" in text
     assert "BUFFER_CHANNEL_ID: ${{ secrets.BUFFER_CHANNEL_ID }}" in text
     assert "BUFFER_ORGANIZATION_ID: ${{ secrets.BUFFER_ORGANIZATION_ID }}" in text
-    assert "DAILY_BOOTSTRAP_BLOCKED_CREDENTIALS=true" in text
+    assert "DAILY_BOOTSTRAP_BLOCKED_BUFFER_CREDENTIALS=true" in text
 
 
 def test_daily_worker_is_native_headless_and_cadence_owned():
