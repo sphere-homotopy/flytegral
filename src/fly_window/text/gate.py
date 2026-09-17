@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import json
 import math
 import statistics
-from dataclasses import dataclass
 from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
 
 import torch
 
+from fly_window.text.generation import render_token_ids
 from fly_window.text.policy import FlyTextPolicy
 from fly_window.text.pretraining import teacher_forcing_loss
 from fly_window.text.vocabulary import FlyVocabulary
@@ -41,6 +44,25 @@ class GateConfig:
         if not math.isfinite(self.temperature) or self.temperature <= 0.0:
             raise ValueError("temperature must be finite and positive")
 
+    @classmethod
+    def from_json(cls, path: Path) -> "GateConfig":
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("gate config must be a JSON object")
+        try:
+            return cls(
+                max_heldout_loss=float(payload["max_heldout_loss"]),
+                min_eos_rate=float(payload["min_eos_rate"]),
+                max_repeat_run=int(payload["max_repeat_run"]),
+                min_non_degenerate_rate=float(payload["min_non_degenerate_rate"]),
+                min_median_chars=int(payload["min_median_chars"]),
+                max_median_chars=int(payload["max_median_chars"]),
+                probe_max_tokens=int(payload["probe_max_tokens"]),
+                temperature=float(payload["temperature"]),
+            )
+        except KeyError as error:
+            raise ValueError(f"gate config missing {error.args[0]}") from error
+
 
 @dataclass(frozen=True, slots=True)
 class GateReport:
@@ -61,31 +83,6 @@ class _Probe:
     max_repeat_run: int
     rendered_chars: int
     finite: bool
-
-
-def _render_tokens(vocabulary: FlyVocabulary, token_ids: Sequence[int]) -> str:
-    tokens = [vocabulary.token_for(int(token_id)) for token_id in token_ids]
-    ignored = {"<BOS>", "<EOS>", "<PAD>"}
-    punctuation_no_left_space = {".", ",", "?", "!", ":", ";", ")", "]", "}"}
-    punctuation_no_right_space = {"(", "[", "{"}
-
-    result = ""
-    previous = ""
-    for token in tokens:
-        if token in ignored:
-            continue
-        if token == "<NL>":
-            result = result.rstrip() + "\n"
-            previous = token
-            continue
-        if token in punctuation_no_left_space:
-            result = result.rstrip() + token
-        elif not result or result.endswith(("\n", " ")) or previous in punctuation_no_right_space:
-            result += token
-        else:
-            result += " " + token
-        previous = token
-    return result.strip()
 
 
 def _max_repeat_run(token_ids: Sequence[int]) -> int:
@@ -145,7 +142,7 @@ def _probe_once(
         current = sampled
 
     repeat_body = [token_id for token_id in body if token_id != eos_id]
-    rendered = _render_tokens(vocabulary, body)
+    rendered = render_token_ids(vocabulary, body)
     return _Probe(
         token_ids=tuple(body),
         terminated_with_eos=terminated,
