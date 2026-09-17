@@ -25,16 +25,19 @@ jobs:
         run: python -m pip install -e '.[dev]'
       - name: Run tests
         run: pytest -q
-      - name: Run collector tests
+      - name: Run JavaScript unit tests
         shell: bash
         run: |
-          if compgen -G "collector/tests/*.test.js" > /dev/null; then
-            node --test collector/tests/*.test.js
+          files=()
+          while IFS= read -r file; do files+=("$file"); done < <(find collector/tests apps_script/tests -type f -name '*.test.js' 2>/dev/null | sort)
+          if [ ${#files[@]} -gt 0 ]; then
+            node --test "${files[@]}"
           fi
       - name: Smoke collector scripts
         run: |
           node --check collector/bootstrap-x-session.js
           node --check collector/collect-cook-corpus.js
+          node --check apps_script/FlyTweetsQueue.js
       - name: Smoke training CLI
         run: python scripts/train.py --help > /dev/null
       - name: Smoke text pretraining CLI
