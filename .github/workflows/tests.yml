@@ -37,6 +37,8 @@ jobs:
         run: |
           node --check collector/bootstrap-x-session.js
           node --check collector/collect-cook-corpus.js
+          node --check collector/metrics-core.js
+          node --check collector/collect-fly-tweet-stats.js
           node --check apps_script/FlyTweetsQueue.js
       - name: Smoke training CLI
         run: python scripts/train.py --help > /dev/null
