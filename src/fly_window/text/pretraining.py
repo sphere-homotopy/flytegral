@@ -29,6 +29,7 @@ class TextTrainingConfig:
     max_oov_fraction: float
     stage_c_teacher_probability: float
     heldout_fraction: float = 0.1
+    max_corpus_sequences: int | None = None
 
     def __post_init__(self) -> None:
         if self.curriculum_examples <= 0:
@@ -49,6 +50,8 @@ class TextTrainingConfig:
             raise ValueError("stage_c_teacher_probability must lie in [0, 1]")
         if not 0.0 < self.heldout_fraction < 1.0:
             raise ValueError("heldout_fraction must lie in (0, 1)")
+        if self.max_corpus_sequences is not None and self.max_corpus_sequences < 2:
+            raise ValueError("max_corpus_sequences must be at least two when set")
 
     @classmethod
     def from_json(cls, path: Path) -> "TextTrainingConfig":
@@ -56,6 +59,7 @@ class TextTrainingConfig:
         if not isinstance(payload, dict):
             raise ValueError("text training config must be a JSON object")
         try:
+            raw_max_sequences = payload.get("max_corpus_sequences")
             return cls(
                 seed=int(payload["seed"]),
                 curriculum_examples=int(payload["curriculum_examples"]),
@@ -69,6 +73,9 @@ class TextTrainingConfig:
                 max_oov_fraction=float(payload["max_oov_fraction"]),
                 stage_c_teacher_probability=float(payload["stage_c_teacher_probability"]),
                 heldout_fraction=float(payload.get("heldout_fraction", 0.1)),
+                max_corpus_sequences=(
+                    None if raw_max_sequences in (None, "") else int(raw_max_sequences)
+                ),
             )
         except KeyError as error:
             raise ValueError(f"text training config missing {error.args[0]}") from error
@@ -153,6 +160,24 @@ def load_cook_sequences(
             sequences.append(prepared.token_ids)
 
     return sequences
+
+
+def limit_corpus_sequences(
+    sequences: Sequence[Sequence[int]],
+    *,
+    max_sequences: int | None,
+    seed: int,
+) -> list[tuple[int, ...]]:
+    """Deterministically cap real-graph pretraining without changing corpus provenance."""
+    normalized = [tuple(int(token) for token in sequence) for sequence in sequences]
+    if max_sequences is None or len(normalized) <= max_sequences:
+        return normalized
+    if max_sequences < 2:
+        raise ValueError("max_sequences must be at least two")
+    indices = list(range(len(normalized)))
+    random.Random(seed).shuffle(indices)
+    selected = sorted(indices[:max_sequences])
+    return [normalized[index] for index in selected]
 
 
 def split_train_heldout(
