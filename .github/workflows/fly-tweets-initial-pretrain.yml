@@ -151,6 +151,22 @@ jobs:
           "FLYTWEETS_RUN_DIR=$($latest.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "FLYTWEETS_RUN_ID=$($latest.Name)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
+      - name: Initialize MaleCNS cadence policy
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cadence = Join-Path $env:FLYTWEETS_RUN_DIR 'cadence.pt'
+          & $env:FLYTWEETS_PYTHON scripts/init_cadence.py `
+            --config configs/cadence_v1.json `
+            --graph-npz $env:FLYTWEETS_GRAPH_NPZ `
+            --nodes-parquet $env:FLYTWEETS_GRAPH_NODES `
+            --output $cadence `
+            --seed 260918
+          if (-not (Test-Path $cadence)) { throw "Cadence checkpoint missing: $cadence" }
+          $cadenceBytes = (Get-Item $cadence).Length
+          if ($cadenceBytes -le 0) { throw 'Cadence checkpoint is empty' }
+          Write-Output "CADENCE_CHECKPOINT_SHA256=$((Get-FileHash -Algorithm SHA256 $cadence).Hash)"
+          "FLYTWEETS_CADENCE_CHECKPOINT=$cadence" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Stage durable training artifact
         run: |
           $ErrorActionPreference = 'Stop'
@@ -159,6 +175,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
           Copy-Item (Join-Path $env:FLYTWEETS_RUN_DIR 'manifest.json') $stage
           Copy-Item (Join-Path $env:FLYTWEETS_RUN_DIR 'checkpoint.pt') $stage
+          Copy-Item $env:FLYTWEETS_CADENCE_CHECKPOINT $stage
           "FLYTWEETS_ARTIFACT_STAGE=$stage" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Output "ARTIFACT_RUN_ID=$env:FLYTWEETS_RUN_ID"
 
