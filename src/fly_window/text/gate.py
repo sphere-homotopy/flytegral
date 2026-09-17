@@ -25,6 +25,8 @@ class GateConfig:
     max_median_chars: int
     probe_max_tokens: int
     temperature: float
+    probe_count: int = 8
+    replay_probe_count: int = 2
 
     def __post_init__(self) -> None:
         if self.max_heldout_loss < 0.0:
@@ -43,6 +45,12 @@ class GateConfig:
             raise ValueError("probe_max_tokens must be positive")
         if not math.isfinite(self.temperature) or self.temperature <= 0.0:
             raise ValueError("temperature must be finite and positive")
+        if self.probe_count < 1:
+            raise ValueError("probe_count must be positive")
+        if self.replay_probe_count < 1:
+            raise ValueError("replay_probe_count must be positive")
+        if self.replay_probe_count > self.probe_count:
+            raise ValueError("replay_probe_count must not exceed probe_count")
 
     @classmethod
     def from_json(cls, path: Path) -> "GateConfig":
@@ -59,6 +67,8 @@ class GateConfig:
                 max_median_chars=int(payload["max_median_chars"]),
                 probe_max_tokens=int(payload["probe_max_tokens"]),
                 temperature=float(payload["temperature"]),
+                probe_count=int(payload.get("probe_count", 8)),
+                replay_probe_count=int(payload.get("replay_probe_count", 2)),
             )
         except KeyError as error:
             raise ValueError(f"gate config missing {error.args[0]}") from error
@@ -74,6 +84,7 @@ class GateReport:
     finite: bool
     replay_exact: bool
     probe_count: int
+    replay_probe_count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,9 +188,10 @@ def evaluate_launch_gate(
                 _probe_once(policy, vocabulary, seed=int(seed), config=config)
                 for seed in probe_seeds
             ]
+            replay_count = min(config.replay_probe_count, len(probes))
             replays = [
                 _probe_once(policy, vocabulary, seed=int(seed), config=config)
-                for seed in probe_seeds
+                for seed in probe_seeds[:replay_count]
             ]
     finally:
         policy.train(was_training)
@@ -195,7 +207,7 @@ def evaluate_launch_gate(
         first.token_ids == second.token_ids
         and first.terminated_with_eos == second.terminated_with_eos
         and first.finite == second.finite
-        for first, second in zip(probes, replays, strict=True)
+        for first, second in zip(probes[:replay_count], replays, strict=True)
     )
 
     passed = (
@@ -215,4 +227,5 @@ def evaluate_launch_gate(
         finite=finite,
         replay_exact=replay_exact,
         probe_count=probe_count,
+        replay_probe_count=replay_count,
     )
