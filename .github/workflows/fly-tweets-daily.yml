@@ -1,0 +1,265 @@
+name: Fly Tweets daily
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: fly-tweets-daily
+  cancel-in-progress: false
+
+jobs:
+  daily:
+    runs-on: [self-hosted, windows, x64, flytegral-pc]
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ". '{0}'"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/fly-tweets-v1
+
+      - name: Prepare persistent runtime
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:LOCALAPPDATA 'flytegral\fly-tweets'
+          $state = Join-Path $root 'state'
+          $runs = Join-Path $root 'daily-runs'
+          $graph = Join-Path $root 'graphs\subgraph_v1'
+          $venv = Join-Path $root '.venv'
+          New-Item -ItemType Directory -Force -Path $root,$state,$runs,$graph | Out-Null
+
+          if (-not (Test-Path (Join-Path $venv 'Scripts\python.exe'))) {
+            py -3.12 -m venv $venv
+          }
+          $python = Join-Path $venv 'Scripts\python.exe'
+          & $python -m pip install --upgrade pip
+          & $python -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch>=2.6'
+          & $python -m pip install -e '.[dev]'
+
+          "FLYTEGRAL_RUNTIME=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "FLYTWEETS_STATE_DIR=$state" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "FLYTWEETS_RUN_ROOT=$runs" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "FLYTWEETS_GRAPH_DIR=$graph" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "FLYTWEETS_PYTHON=$python" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Ensure MaleCNS graph artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $npz = Join-Path $env:FLYTWEETS_GRAPH_DIR 'subgraph_v1.npz'
+          $nodes = Join-Path $env:FLYTWEETS_GRAPH_DIR 'subgraph_v1_nodes.parquet'
+          $manifest = Join-Path $env:FLYTWEETS_GRAPH_DIR 'subgraph_v1_manifest.json'
+          if (-not ((Test-Path $npz) -and (Test-Path $nodes) -and (Test-Path $manifest))) {
+            Get-ChildItem $env:FLYTWEETS_GRAPH_DIR -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
+            gh run download 34867229278 -R sphere-homotopy/flytegral -n malecns-task-graph-v1 -D $env:FLYTWEETS_GRAPH_DIR
+          }
+          if (-not ((Test-Path $npz) -and (Test-Path $nodes) -and (Test-Path $manifest))) {
+            throw 'MaleCNS graph artifact is incomplete.'
+          }
+          "FLYTWEETS_GRAPH_NPZ=$npz" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "FLYTWEETS_GRAPH_NODES=$nodes" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Seed durable model state
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $anchor = Join-Path $env:FLYTWEETS_STATE_DIR 'anchor-checkpoint.pt'
+          $current = Join-Path $env:FLYTWEETS_STATE_DIR 'current-checkpoint.pt'
+          $cadence = Join-Path $env:FLYTWEETS_STATE_DIR 'cadence-checkpoint.pt'
+          $rows = Join-Path $env:FLYTWEETS_STATE_DIR 'rows.json'
+          $outbox = Join-Path $env:FLYTWEETS_STATE_DIR 'outbox.jsonl'
+          $runtimeState = Join-Path $env:FLYTWEETS_STATE_DIR 'runtime-state.json'
+          $result = Join-Path $env:FLYTWEETS_STATE_DIR 'last-cycle-result.json'
+
+          if (-not (Test-Path $anchor)) {
+            $pretrainRoot = Join-Path $env:FLYTEGRAL_RUNTIME 'text-runs'
+            $candidate = Get-ChildItem $pretrainRoot -Directory -ErrorAction SilentlyContinue |
+              Where-Object { Test-Path (Join-Path $_.FullName 'checkpoint.pt') } |
+              Sort-Object LastWriteTimeUtc -Descending |
+              Select-Object -First 1
+            if ($null -eq $candidate) {
+              throw 'No initial Fly Tweets checkpoint exists yet.'
+            }
+            Copy-Item (Join-Path $candidate.FullName 'checkpoint.pt') $anchor
+          }
+          if (-not (Test-Path $current)) { Copy-Item $anchor $current }
+          if (-not (Test-Path $cadence)) {
+            & $env:FLYTWEETS_PYTHON scripts/init_cadence.py `
+              --config configs/cadence_v1.json `
+              --graph-npz $env:FLYTWEETS_GRAPH_NPZ `
+              --nodes-parquet $env:FLYTWEETS_GRAPH_NODES `
+              --output $cadence
+          }
+          if (-not (Test-Path $rows)) { '[]' | Set-Content -Encoding utf8 $rows }
+          if (-not (Test-Path $outbox)) { New-Item -ItemType File -Force -Path $outbox | Out-Null }
+
+          "FLYTWEETS_ANCHOR_CHECKPOINT=$anchor" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "FLYTWEETS_CURRENT_CHECKPOINT=$current" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "FLYTWEETS_CADENCE_CHECKPOINT=$cadence" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "FLYTWEETS_ROWS=$rows" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "FLYTWEETS_OUTBOX=$outbox" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "FLYTWEETS_RUNTIME_STATE=$runtimeState" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "FLYTWEETS_CYCLE_RESULT=$result" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Sync previous generated outbox into durable rows
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & $env:FLYTWEETS_PYTHON scripts/sync_fly_tweet_outbox.py `
+            --rows-json $env:FLYTWEETS_ROWS `
+            --outbox-jsonl $env:FLYTWEETS_OUTBOX
+
+      - name: Prepare metrics targets
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $targets = Join-Path $env:FLYTWEETS_STATE_DIR 'metrics-targets.jsonl'
+          $rows = @(Get-Content -Raw $env:FLYTWEETS_ROWS | ConvertFrom-Json)
+          $eligible = @($rows | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.tweet_url) })
+          $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+          if ($eligible.Count -eq 0) {
+            [System.IO.File]::WriteAllText($targets, '', $utf8NoBom)
+          } else {
+            $lines = @($eligible | ForEach-Object { $_ | ConvertTo-Json -Compress -Depth 20 })
+            [System.IO.File]::WriteAllLines($targets, $lines, $utf8NoBom)
+          }
+          "FLYTWEETS_METRICS_TARGETS=$targets" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "FLYTWEETS_METRICS_TARGET_COUNT=$($eligible.Count)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Output "METRICS_TARGET_COUNT=$($eligible.Count)"
+
+      - name: Prepare headless X metrics collector
+        if: env.FLYTWEETS_METRICS_TARGET_COUNT != '0'
+        working-directory: collector
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npm install --omit=dev --no-audit --no-fund
+          npx playwright install chromium
+
+      - name: Collect X stats headlessly
+        id: collect_stats
+        if: env.FLYTWEETS_METRICS_TARGET_COUNT != '0'
+        continue-on-error: true
+        working-directory: collector
+        env:
+          X_PROFILE_DIR: C:\tools\x-stats\x-browser-profile
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $metrics = Join-Path $env:FLYTWEETS_STATE_DIR 'metrics-latest.jsonl'
+          node collect-fly-tweet-stats.js --input $env:FLYTWEETS_METRICS_TARGETS --output $metrics
+          "FLYTWEETS_METRICS_LATEST=$metrics" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Merge fresh metrics when available
+        if: steps.collect_stats.outcome == 'success'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & $env:FLYTWEETS_PYTHON scripts/merge_fly_tweet_stats.py `
+            --rows-json $env:FLYTWEETS_ROWS `
+            --metrics-jsonl $env:FLYTWEETS_METRICS_LATEST
+
+      - name: Run cadence-owned daily cycle
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $requestDate = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
+          $seed = [int]((Get-Date).ToUniversalTime().ToString('yyyyMMdd'))
+          $output = & $env:FLYTWEETS_PYTHON scripts/run_daily_text_training.py `
+            --request-date $requestDate `
+            --attempt 1 `
+            --current-checkpoint $env:FLYTWEETS_CURRENT_CHECKPOINT `
+            --anchor-checkpoint $env:FLYTWEETS_ANCHOR_CHECKPOINT `
+            --cadence-checkpoint $env:FLYTWEETS_CADENCE_CHECKPOINT `
+            --runtime-state $env:FLYTWEETS_RUNTIME_STATE `
+            --runtime-config configs/fly_tweets_runtime_v1.json `
+            --rows-json $env:FLYTWEETS_ROWS `
+            --outbox-jsonl $env:FLYTWEETS_OUTBOX `
+            --run-root $env:FLYTWEETS_RUN_ROOT `
+            --reward-config configs/daily_reward_v1.json `
+            --training-config configs/daily_training_v1.json `
+            --graph-npz $env:FLYTWEETS_GRAPH_NPZ `
+            --nodes-parquet $env:FLYTWEETS_GRAPH_NODES `
+            --base-seed $seed `
+            --device cpu
+          if ($LASTEXITCODE -ne 0) { throw 'Fly Tweets daily cycle failed.' }
+          $output | Set-Content -Encoding utf8 $env:FLYTWEETS_CYCLE_RESULT
+          $cycle = Get-Content -Raw $env:FLYTWEETS_CYCLE_RESULT | ConvertFrom-Json
+          if ([bool]$cycle.training_applied) {
+            $source = [string]$cycle.checkpoint
+            if (-not (Test-Path $source)) { throw "Daily checkpoint missing: $source" }
+            $temp = "$env:FLYTWEETS_CURRENT_CHECKPOINT.tmp"
+            Copy-Item -Force $source $temp
+            Move-Item -Force $temp $env:FLYTWEETS_CURRENT_CHECKPOINT
+          }
+          Get-Content $env:FLYTWEETS_CYCLE_RESULT
+
+      - name: Sync newly generated outbox into durable rows
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & $env:FLYTWEETS_PYTHON scripts/sync_fly_tweet_outbox.py `
+            --rows-json $env:FLYTWEETS_ROWS `
+            --outbox-jsonl $env:FLYTWEETS_OUTBOX
+
+      - name: Deliver health alert when required
+        env:
+          FLYTWEETS_ALERT_TO: ${{ secrets.FLYTWEETS_ALERT_TO }}
+          FLYTWEETS_SMTP_SERVER: ${{ secrets.FLYTWEETS_SMTP_SERVER }}
+          FLYTWEETS_SMTP_PORT: ${{ secrets.FLYTWEETS_SMTP_PORT }}
+          FLYTWEETS_SMTP_USER: ${{ secrets.FLYTWEETS_SMTP_USER }}
+          FLYTWEETS_SMTP_PASSWORD: ${{ secrets.FLYTWEETS_SMTP_PASSWORD }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cycle = Get-Content -Raw $env:FLYTWEETS_CYCLE_RESULT | ConvertFrom-Json
+          $alerts = @($cycle.alerts)
+          if ($alerts.Count -eq 0) {
+            Write-Output 'HEALTH_ALERTS=0'
+            exit 0
+          }
+
+          $state = Get-Content -Raw $env:FLYTWEETS_RUNTIME_STATE | ConvertFrom-Json
+          if ($null -ne $state.last_alert_at -and -not [string]::IsNullOrWhiteSpace([string]$state.last_alert_at)) {
+            $lastAlert = [DateTimeOffset]::Parse([string]$state.last_alert_at)
+            if ([DateTimeOffset]::UtcNow - $lastAlert -lt [TimeSpan]::FromHours(24)) {
+              Write-Output 'HEALTH_ALERT_SUPPRESSED_RECENT=true'
+              exit 0
+            }
+          }
+
+          $required = @(
+            $env:FLYTWEETS_ALERT_TO,
+            $env:FLYTWEETS_SMTP_SERVER,
+            $env:FLYTWEETS_SMTP_PORT,
+            $env:FLYTWEETS_SMTP_USER,
+            $env:FLYTWEETS_SMTP_PASSWORD
+          )
+          if (@($required | Where-Object { [string]::IsNullOrWhiteSpace([string]$_) }).Count -gt 0) {
+            $alerts | ConvertTo-Json -Depth 10 | Write-Output
+            throw 'Fly Tweets health alert exists but SMTP alert secrets are not configured.'
+          }
+
+          $subject = '[Fly Tweets] health alert'
+          $body = ($alerts | ForEach-Object { "[$($_.code)] $($_.message)" }) -join "`r`n"
+          $body += "`r`n`r`nRun: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+          $message = [System.Net.Mail.MailMessage]::new()
+          $message.From = [System.Net.Mail.MailAddress]::new($env:FLYTWEETS_SMTP_USER)
+          $message.To.Add($env:FLYTWEETS_ALERT_TO)
+          $message.Subject = $subject
+          $message.Body = $body
+          $smtp = [System.Net.Mail.SmtpClient]::new($env:FLYTWEETS_SMTP_SERVER, [int]$env:FLYTWEETS_SMTP_PORT)
+          $smtp.EnableSsl = $true
+          $smtp.Credentials = [System.Net.NetworkCredential]::new(
+            $env:FLYTWEETS_SMTP_USER,
+            $env:FLYTWEETS_SMTP_PASSWORD
+          )
+          try {
+            $smtp.Send($message)
+          } finally {
+            $smtp.Dispose()
+            $message.Dispose()
+          }
+
+          $state.last_alert_at = [DateTimeOffset]::UtcNow.ToString('o')
+          $state | ConvertTo-Json -Depth 10 | Set-Content -Encoding utf8 $env:FLYTWEETS_RUNTIME_STATE
+          Write-Output "HEALTH_ALERT_SENT=$($alerts.Count)"
