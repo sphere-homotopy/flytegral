@@ -1,6 +1,11 @@
 name: Fly Tweets daily
 
 on:
+  push:
+    branches:
+      - feature/fly-tweets-v1
+    paths:
+      - .github/workflows/fly-tweets-daily.yml
   schedule:
     - cron: '17 3 * * *'
   workflow_dispatch:
