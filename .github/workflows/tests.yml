@@ -37,6 +37,8 @@ jobs:
           node --check collector/collect-cook-corpus.js
       - name: Smoke training CLI
         run: python scripts/train.py --help > /dev/null
+      - name: Smoke text pretraining CLI
+        run: python scripts/train_text.py --help > /dev/null
       - name: Smoke evaluation CLI
         run: python scripts/evaluate.py --help > /dev/null
       - name: Smoke benchmark CLI
