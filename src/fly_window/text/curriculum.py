@@ -89,12 +89,9 @@ def generate_curriculum(
         "?",
         ":",
         "every",
+        "some",
         "if",
         "then",
-        "there",
-        "exists",
-        "such",
-        "that",
         "why",
         "not",
         "is",
@@ -121,7 +118,7 @@ def generate_curriculum(
         if choice == 1:
             return ["if", *statement(), "then", *statement(), "."]
         if choice == 2:
-            return ["there", "exists", noun(), "such", "that", *statement(), "."]
+            return ["some", noun(), "is", prop(), "."]
         if choice == 3:
             return ["why", "is", noun(), prop(), "?"]
         if choice == 4:
