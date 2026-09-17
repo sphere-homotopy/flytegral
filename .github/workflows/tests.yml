@@ -31,6 +31,10 @@ jobs:
           if compgen -G "collector/tests/*.test.js" > /dev/null; then
             node --test collector/tests/*.test.js
           fi
+      - name: Smoke collector scripts
+        run: |
+          node --check collector/bootstrap-x-session.js
+          node --check collector/collect-cook-corpus.js
       - name: Smoke training CLI
         run: python scripts/train.py --help > /dev/null
       - name: Smoke evaluation CLI
