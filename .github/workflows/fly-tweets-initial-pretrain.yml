@@ -113,6 +113,7 @@ jobs:
           [System.IO.File]::WriteAllText($smokeConfig, $json, $utf8NoBom)
           & $env:FLYTWEETS_PYTHON scripts/train_text.py `
             --config $smokeConfig `
+            --gate-config configs/text_gate_smoke.json `
             --graph-npz $env:FLYTWEETS_GRAPH_NPZ `
             --nodes-parquet $env:FLYTWEETS_GRAPH_NODES `
             --graph-manifest $env:FLYTWEETS_GRAPH_MANIFEST `
@@ -120,13 +121,14 @@ jobs:
             --run-root (Join-Path $smoke 'runs') `
             --device cpu
 
-      - name: Full initial Fly Tweets pretraining
+      - name: Bounded initial Fly Tweets pretraining
         run: |
           $ErrorActionPreference = 'Stop'
           $runRoot = Join-Path $env:FLYTEGRAL_RUNTIME 'text-runs'
           New-Item -ItemType Directory -Force -Path $runRoot | Out-Null
           & $env:FLYTWEETS_PYTHON scripts/train_text.py `
-            --config configs/text_training_v1.json `
+            --config configs/text_training_cpu_v1.json `
+            --gate-config configs/text_gate_v1.json `
             --graph-npz $env:FLYTWEETS_GRAPH_NPZ `
             --nodes-parquet $env:FLYTWEETS_GRAPH_NODES `
             --graph-manifest $env:FLYTWEETS_GRAPH_MANIFEST `
@@ -139,7 +141,10 @@ jobs:
           $checkpoint = Join-Path $latest.FullName 'checkpoint.pt'
           if (-not (Test-Path $manifest)) { throw "Training manifest missing: $manifest" }
           if (-not (Test-Path $checkpoint)) { throw "Training checkpoint missing: $checkpoint" }
-          Get-Content -Raw $manifest | ConvertFrom-Json | Out-Null
+          $meta = Get-Content -Raw $manifest | ConvertFrom-Json
+          if ([int]$meta.corpus.source_usable_sequences -lt [int]$meta.corpus.selected_sequences) {
+            throw 'Selected corpus exceeds source corpus.'
+          }
           $checkpointBytes = (Get-Item $checkpoint).Length
           if ($checkpointBytes -le 0) { throw 'Training checkpoint is empty' }
           $manifestHash = (Get-FileHash -Algorithm SHA256 $manifest).Hash
@@ -187,11 +192,34 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Queue first Fly Tweets daily bootstrap once
+      - name: Queue first Fly Tweets daily bootstrap once credentials exist
         env:
           GH_TOKEN: ${{ github.token }}
+          BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
+          BUFFER_CHANNEL_ID: ${{ secrets.BUFFER_CHANNEL_ID }}
+          BUFFER_ORGANIZATION_ID: ${{ secrets.BUFFER_ORGANIZATION_ID }}
+          FLYTWEETS_ALERT_TO: ${{ secrets.FLYTWEETS_ALERT_TO }}
+          FLYTWEETS_SMTP_SERVER: ${{ secrets.FLYTWEETS_SMTP_SERVER }}
+          FLYTWEETS_SMTP_PORT: ${{ secrets.FLYTWEETS_SMTP_PORT }}
+          FLYTWEETS_SMTP_USER: ${{ secrets.FLYTWEETS_SMTP_USER }}
+          FLYTWEETS_SMTP_PASSWORD: ${{ secrets.FLYTWEETS_SMTP_PASSWORD }}
         run: |
           $ErrorActionPreference = 'Stop'
+          $required = @(
+            $env:BUFFER_API_KEY,
+            $env:BUFFER_CHANNEL_ID,
+            $env:BUFFER_ORGANIZATION_ID,
+            $env:FLYTWEETS_ALERT_TO,
+            $env:FLYTWEETS_SMTP_SERVER,
+            $env:FLYTWEETS_SMTP_PORT,
+            $env:FLYTWEETS_SMTP_USER,
+            $env:FLYTWEETS_SMTP_PASSWORD
+          )
+          if (@($required | Where-Object { [string]::IsNullOrWhiteSpace([string]$_) }).Count -gt 0) {
+            Write-Output 'DAILY_BOOTSTRAP_BLOCKED_CREDENTIALS=true'
+            exit 0
+          }
+
           $repo = 'sphere-homotopy/flytegral'
           $workflow = 'fly-tweets-daily.yml'
           $branch = 'feature/fly-tweets-v1'
