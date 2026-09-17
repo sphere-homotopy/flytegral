@@ -1,0 +1,66 @@
+name: TEMP Fly Tweets free RAM and kick pretrain
+
+on:
+  push:
+    branches:
+      - feature/fly-tweets-v1
+    paths:
+      - .github/workflows/fly-tweets-free-ram-and-kick.yml
+
+permissions:
+  contents: read
+
+jobs:
+  free-ram-and-kick:
+    runs-on: [self-hosted, windows, x64, flytegral-pc]
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ". '{0}'"
+    steps:
+      - name: Free desktop RAM and dispatch fresh native pretrain
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          function Show-Memory([string]$label) {
+            $os = Get-CimInstance Win32_OperatingSystem
+            $totalMb = [math]::Round($os.TotalVisibleMemorySize / 1024, 0)
+            $freeMb = [math]::Round($os.FreePhysicalMemory / 1024, 0)
+            Write-Host "$label TOTAL_MB=$totalMb FREE_MB=$freeMb USED_MB=$($totalMb-$freeMb)"
+            Get-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First 15 Name,Id,@{N='WorkingSetMB';E={[math]::Round($_.WorkingSet64/1MB,1)}} | Format-Table -AutoSize
+          }
+
+          Show-Memory 'MEMORY_BEFORE'
+
+          $desktopHeavy = @(
+            'chrome','msedge','firefox',
+            'Code','Cursor','Codex','ChatGPT',
+            'Teams','ms-teams','Discord','Telegram','steam','steamwebhelper'
+          )
+          foreach ($name in $desktopHeavy) {
+            Get-Process -Name $name -ErrorAction SilentlyContinue | ForEach-Object {
+              Write-Host "KILL_DESKTOP name=$($_.ProcessName) pid=$($_.Id) ws_mb=$([math]::Round($_.WorkingSet64/1MB,1))"
+              Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+          Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+            Where-Object {
+              $_.Name -in @('python.exe','pythonw.exe') -and
+              $_.CommandLine -and
+              $_.CommandLine -match '(?i)flytegral|train_text|AppData\\Local\\flytegral'
+            } |
+            ForEach-Object {
+              Write-Host "KILL_STALE_PYTHON pid=$($_.ProcessId) cmd=$($_.CommandLine)"
+              Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+            }
+
+          Start-Sleep -Seconds 5
+          Show-Memory 'MEMORY_AFTER'
+
+          gh auth status --hostname github.com | Out-Host
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub CLI authentication unavailable on Flytegral runner.' }
+
+          gh workflow run fly-tweets-initial-pretrain.yml -R sphere-homotopy/flytegral --ref feature/fly-tweets-v1
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to dispatch fresh Fly Tweets pretrain.' }
+          Write-Host 'PRETRAIN_DISPATCHED_AFTER_RAM_CLEANUP=true'
