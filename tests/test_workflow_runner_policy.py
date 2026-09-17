@@ -41,7 +41,9 @@ def test_native_bootstrap_chain_dispatches_each_next_stage_idempotently():
 
     assert "gh run list" in probe
     assert "fly-tweets-migrate-legacy-runtime.yml" in probe
-    assert "gh workflow run $workflow" in probe
+    assert "fly-tweets-initial-pretrain.yml" in probe
+    assert "PRETRAIN_RECOVERY_DISPATCHED=true" in probe
+    assert "gh workflow run $pretrainWorkflow" in probe
 
     assert "gh run list" in migration
     assert "fly-tweets-initial-pretrain.yml" in migration
@@ -50,6 +52,18 @@ def test_native_bootstrap_chain_dispatches_each_next_stage_idempotently():
     assert "gh run list" in pretrain
     assert "fly-tweets-daily.yml" in pretrain
     assert "gh workflow run $workflow" in pretrain
+
+
+def test_initial_pretrain_is_bounded_and_daily_bootstrap_is_credential_gated():
+    text = (WORKFLOW_DIR / "fly-tweets-initial-pretrain.yml").read_text(encoding="utf-8")
+
+    assert "--gate-config configs/text_gate_smoke.json" in text
+    assert "--config configs/text_training_cpu_v1.json" in text
+    assert "--gate-config configs/text_gate_v1.json" in text
+    assert "BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}" in text
+    assert "BUFFER_CHANNEL_ID: ${{ secrets.BUFFER_CHANNEL_ID }}" in text
+    assert "BUFFER_ORGANIZATION_ID: ${{ secrets.BUFFER_ORGANIZATION_ID }}" in text
+    assert "DAILY_BOOTSTRAP_BLOCKED_CREDENTIALS=true" in text
 
 
 def test_daily_worker_is_native_headless_and_cadence_owned():
@@ -73,4 +87,5 @@ def test_daily_worker_reconciles_and_schedules_buffer_delivery():
     assert text.count("publish_fly_tweets_buffer.py") >= 2
     assert "BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}" in text
     assert "BUFFER_CHANNEL_ID: ${{ secrets.BUFFER_CHANNEL_ID }}" in text
+    assert "BUFFER_ORGANIZATION_ID: ${{ secrets.BUFFER_ORGANIZATION_ID }}" in text
     assert "Buffer credentials are not configured" in text
