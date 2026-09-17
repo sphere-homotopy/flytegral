@@ -50,14 +50,14 @@ jobs:
         if: steps.config.outputs.enabled == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          STALE_TRAINING_SECONDS: '604800' # 7 * 24 * 60 * 60
+          STALE_DAILY_SECONDS: '172800' # 48 * 60 * 60
         shell: bash
         run: |
           set -euo pipefail
           repo='sphere-homotopy/flytegral'
           workflow='fly-tweets-daily.yml'
           branch='feature/fly-tweets-v1'
-          stale_training_seconds=$((7 * 24 * 60 * 60))
-          stale_daily_seconds=$((48 * 60 * 60))
           mkdir -p watchdog
 
           gh run list -R "$repo" --workflow "$workflow" --branch "$branch" --limit 100 \
@@ -149,10 +149,6 @@ jobs:
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
               out.write(f"alert={'true' if reasons else 'false'}\n")
           PY
-        env:
-          GH_TOKEN: ${{ github.token }}
-          STALE_TRAINING_SECONDS: ${{ env.STALE_TRAINING_SECONDS }}
-          STALE_DAILY_SECONDS: ${{ env.STALE_DAILY_SECONDS }}
 
       - name: Send watchdog email
         if: steps.config.outputs.enabled == 'true' && steps.inspect.outputs.alert == 'true'
