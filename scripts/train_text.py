@@ -19,6 +19,7 @@ from fly_window.text.pretraining import (
     TextTrainingConfig,
     load_cook_sequences,
     scheduled_sampling_loss,
+    split_train_heldout,
     teacher_forcing_loss,
 )
 from fly_window.text.vocabulary import build_v1_vocabulary
@@ -187,6 +188,8 @@ def main() -> None:
         count=config.curriculum_examples,
     )
     corpus_sequences: list[tuple[int, ...]] = []
+    train_corpus: list[tuple[int, ...]] = []
+    heldout_corpus: list[tuple[int, ...]] = []
     if config.stage_b_epochs > 0 or config.stage_c_epochs > 0:
         if not args.corpus.exists():
             raise FileNotFoundError(
@@ -197,8 +200,13 @@ def main() -> None:
             vocabulary,
             max_oov_fraction=config.max_oov_fraction,
         )
-        if not corpus_sequences:
-            raise ValueError("Cook corpus produced zero usable training sequences")
+        if len(corpus_sequences) < 2:
+            raise ValueError("Cook corpus must yield at least two usable training sequences")
+        train_corpus, heldout_corpus = split_train_heldout(
+            corpus_sequences,
+            heldout_fraction=config.heldout_fraction,
+            seed=config.seed + 40_000,
+        )
 
     losses = {
         "stage_a": _train_stage(
@@ -214,7 +222,7 @@ def main() -> None:
         "stage_b": _train_stage(
             policy=policy,
             optimizer=optimizer,
-            sequences=corpus_sequences,
+            sequences=train_corpus,
             epochs=config.stage_b_epochs,
             batch_size=config.batch_size,
             gradient_clip_norm=config.gradient_clip_norm,
@@ -224,7 +232,7 @@ def main() -> None:
         "stage_c": _train_stage(
             policy=policy,
             optimizer=optimizer,
-            sequences=corpus_sequences,
+            sequences=train_corpus,
             epochs=config.stage_c_epochs,
             batch_size=config.batch_size,
             gradient_clip_norm=config.gradient_clip_norm,
@@ -271,6 +279,8 @@ def main() -> None:
             "path": str(args.corpus),
             "sha256": _sha256(args.corpus) if args.corpus.exists() else None,
             "usable_sequences": len(corpus_sequences),
+            "train_sequences": len(train_corpus),
+            "heldout_sequences": len(heldout_corpus),
         },
         "curriculum_sequences": len(curriculum),
         "losses": losses,
@@ -297,6 +307,8 @@ def main() -> None:
                 "checkpoint": str(checkpoint_path),
                 "manifest": str(manifest_path),
                 "usable_corpus_sequences": len(corpus_sequences),
+                "train_corpus_sequences": len(train_corpus),
+                "heldout_corpus_sequences": len(heldout_corpus),
             },
             indent=2,
             sort_keys=True,
