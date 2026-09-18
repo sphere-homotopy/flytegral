@@ -2,7 +2,7 @@
 
 ## Goal
 
-Turn the existing MaleCNS/connectome-based Flytegral codebase into a fully autonomous English-language X/Twitter author that writes 10 tweets per day, publishes them through the existing Google Sheets -> Buffer pipeline with stochastic timing, collects engagement statistics, performs one daily learning update, and then immediately generates the next batch of 10 tweets.
+Turn the existing MaleCNS/connectome-based Flytegral codebase into a fully autonomous English-language X/Twitter author. The fly itself chooses how many tweets to emit and each exact publication time. Generated rows are stored durably in Google Sheets; Apps Script treats Buffer only as an 8-scheduled-post cache, refilling free slots without changing the fly's cadence. Engagement is collected and used for conservative daily learning.
 
 No LLM or other language model may participate in tweet generation, filtering, rewriting, ranking, reward assignment, vocabulary expansion, or daily training.
 
@@ -11,7 +11,7 @@ No LLM or other language model may participate in tweet generation, filtering, r
 1. The author is the fly system. External code may encode words into sensory stimulation, decode activity into token logits, schedule posts, collect metrics, and execute deterministic training algorithms, but it may not choose or rewrite tweet content.
 2. All runtime operations are invisible to the user in normal operation. No terminal, browser, Python, Playwright, confirmation dialog, or training window may appear on the desktop.
 3. The home computer may be offline. Daily training work must remain durable until the self-hosted worker becomes available, then execute automatically.
-4. Each successful daily training cycle produces the next 10 tweets immediately from the newly updated checkpoint.
+4. Each successful daily cycle immediately samples the next fly-owned publication horizon from the deployed text/cadence policies. The fly chooses both count and exact `scheduled_at` values.
 5. Generated tweets and their exact generation provenance must be auditable: checkpoint id/SHA, RNG seed, token sequence, log probabilities, generation timestamp, and batch id are stored.
 6. No rejection sampling based on meaning, humor, style, engagement prediction, or human/AI quality judgment. Technical safety gates may reject malformed sequences only before the public-launch gate described below.
 7. English only for v1.
@@ -30,9 +30,9 @@ The system has seven independent units:
 2. `FlyVocabulary`: fixed 1024-token English/math/fly vocabulary.
 3. `FlyPretrainer`: deterministic supervised curriculum for initial language competence.
 4. `FlyGenerator`: autoregressive tweet generation and provenance capture.
-5. `FlyPublisher`: Google Sheet queue schema plus Buffer scheduling with stochastic timing.
+5. `FlyPublisher`: durable Google Sheet backlog plus an 8-slot Buffer cache that preserves fly-selected publication times.
 6. `FlyMetrics`: DOM-based X statistics collection and row reconciliation.
-7. `FlyDailyTrainer`: reward calculation, one daily policy update, checkpointing, and generation of the next 10 tweets.
+7. `FlyDailyTrainer`: reward calculation, conservative text/cadence updates, checkpointing, and generation of the next fly-selected horizon.
 
 GitHub Actions provides durable orchestration. Training itself runs only on the Windows self-hosted runner / home PC.
 
@@ -163,7 +163,7 @@ After this gate has been passed for the deployed model lineage, generated tweets
 
 ## Tweet generation
 
-Each daily batch contains exactly 10 tweets.
+Each generated batch has a fly-selected positive size. The cadence policy decides whether to stop or wait by one of its learned discrete intervals; therefore batch size and exact publication timestamps are outputs of the fly rather than fixed scheduler constants.
 
 Generation rules:
 
@@ -208,20 +208,25 @@ Rows are append-only for generation provenance. Operational/status fields may be
 
 ## Scheduling and Buffer
 
-Reuse the existing Google Sheets -> Buffer queue concept.
+Google Sheets is the durable publication backlog. Buffer is not the source of truth and must never choose publication cadence.
 
-For each 10-tweet batch, assign ten baseline publication slots distributed across the configured waking-day window in `Europe/Belgrade`.
+The MaleCNS cadence policy produces every `scheduled_at` together with cadence provenance. Apps Script preserves those values exactly.
 
-Each slot receives independent stochastic jitter sampled from a zero-mean clipped normal distribution. Initial configuration:
+The dedicated Fly Buffer account has a hard operational cache limit of 8 scheduled posts. Apps Script:
 
-- sigma: 22 minutes
-- absolute clip: 45 minutes
-- minimum gap after sorting: 35 minutes
+- runs a background refill trigger every 10 minutes,
+- queries the Fly Buffer channel only when Sheet rows are waiting,
+- computes free slots as `max(0, 8 - scheduled_count)`,
+- sorts unpublished Sheet rows by fly-selected `scheduled_at`,
+- fills only the available slots,
+- never changes count, order, or timestamps selected by the fly,
+- enforces idempotency by `batch_id + tweet_index`.
 
-The Apps Script must enforce uniqueness/idempotency by batch id plus tweet index before creating a Buffer post.
+Rows that cannot enter Buffer because all 8 slots are occupied remain `waiting` in the Sheet.
 
-Scheduling happens without user interaction.
+If a `waiting` row's fly-selected `scheduled_at` passes before a slot becomes free, it becomes terminal `missed` and is never published later. It receives a cadence-only negative reward so future cadence learning can reduce overly aggressive posting pressure. Text reward remains empty so the language policy is not punished for a scheduling-capacity miss.
 
+Transport/API failures use `retry`, not `waiting`, and do not receive the cadence backpressure penalty.
 ## Metrics collection
 
 Reuse/adapt the old DOM collector approach that reads visible X tweet metrics from the rendered page, including:
@@ -254,7 +259,7 @@ Raw engagement is normalized to reduce dependence on audience size and exposure.
 
 Replies, reposts, and bookmarks receive larger coefficients than likes. Exact coefficients are configuration, versioned with each training run.
 
-The resulting ten-tweet daily rewards are centered so daily learning changes relative preference rather than blindly maximizing account growth noise.
+Published engagement rewards are centered within the eligible cohort so daily learning changes relative preference rather than blindly maximizing account growth noise. Cadence-only penalties such as Buffer-backpressure misses are tracked separately from text rewards.
 
 ## Daily learning
 
@@ -276,21 +281,20 @@ A successful daily cycle is atomic at the logical level:
 3. train from the currently deployed checkpoint,
 4. write a new immutable checkpoint plus training manifest,
 5. mark consumed reward rows,
-6. generate the next 10 tweets from the new checkpoint,
-7. append their rows to the Sheet.
+6. sample the next fly-owned publication horizon from the updated text/cadence state,
+7. append the resulting variable-size batch, exact `scheduled_at` values, and provenance to the Sheet.
 
 Idempotency keys prevent duplicate consumption or duplicate batches if a job retries.
 
 ## GitHub orchestration and offline PC
 
-A scheduled GitHub workflow creates/maintains a durable daily training request keyed by date. The request is not lost if the home computer is offline.
+The default branch owns a lightweight scheduled orchestrator. It checks the durable Fly success marker and starts the self-hosted daily worker only when a new cycle is due.
 
-A Windows self-hosted runner executes pending requests whenever it is online. The worker must run non-interactively and without visible windows.
+GitHub self-hosted jobs can remain queued for at most 24 hours, so durability must not rely on one queued job. The orchestrator runs hourly under a concurrency group. If the PC is offline, the currently queued worker may eventually expire, but the latest pending orchestrator run retries automatically once the previous run leaves the concurrency group. This keeps retrying until the PC becomes available.
 
-After successful completion, the request is marked complete with the produced checkpoint id and batch id.
+The Windows worker executes the actual Fly Tweets cycle serially and non-interactively. A successful cycle updates the durable success marker only after generation, Sheet append, and heartbeat creation have completed.
 
-If several days accumulated while the PC was offline, process them serially. Do not run concurrent updates against the same model lineage.
-
+No concurrent updates may run against the same model lineage.
 ## Background-only Windows requirement
 
 Normal operation must produce no visible UI.
@@ -327,8 +331,8 @@ Automated tests must cover:
 - deterministic trajectory replay from seed/checkpoint,
 - max-length and EOS handling,
 - Google Sheet row serialization,
-- stochastic schedule bounds and minimum gap,
-- Buffer idempotency keys,
+- cadence decision serialization, minimum-gap safety, and variable batch sizes,
+- Buffer idempotency keys, 8-slot refill behavior, missed-row terminal handling, and cadence-only backpressure penalties,
 - metrics parser fixtures based on X aria-label text,
 - reward calculation and normalization,
 - prevention of double-consuming a training row,
@@ -350,11 +354,11 @@ Automated tests must cover:
 
 The system is complete when, without user interaction or visible desktop processes, a trained MaleCNS-based text policy can:
 
-1. generate 10 English math/fly tweets,
+1. generate a fly-selected number of English math/fly tweets with exact fly-selected publication times,
 2. append them with provenance to Google Sheets,
-3. schedule them through Buffer with stochastic timing,
+3. persist them in Google Sheets and feed at most 8 at a time into Buffer without changing fly-selected timing,
 4. collect engagement metrics after publication,
 5. perform one conservative daily reward-driven update when the home PC is available,
 6. checkpoint the updated policy,
-7. immediately generate the next 10 tweets,
+7. immediately generate the next fly-selected publication horizon,
 8. survive PC-offline periods without losing or duplicating work.
