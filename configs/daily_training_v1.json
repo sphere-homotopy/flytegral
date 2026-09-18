@@ -1,0 +1,8 @@
+{
+  "learning_rate": 0.00005,
+  "weight_decay": 0.00001,
+  "entropy_coefficient": 0.01,
+  "anchor_kl_coefficient": 0.1,
+  "gradient_clip_norm": 0.5,
+  "max_update_steps": 1
+}

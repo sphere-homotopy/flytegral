@@ -1,0 +1,14 @@
+{
+  "seed": 260917,
+  "curriculum_examples": 4096,
+  "stage_a_epochs": 2,
+  "stage_b_epochs": 4,
+  "stage_c_epochs": 1,
+  "batch_size": 8,
+  "learning_rate": 0.0003,
+  "weight_decay": 0.00001,
+  "gradient_clip_norm": 1.0,
+  "max_oov_fraction": 0.35,
+  "stage_c_teacher_probability": 0.65,
+  "heldout_fraction": 0.1
+}

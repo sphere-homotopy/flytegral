@@ -1,0 +1,8 @@
+{
+  "initial_reserve_hours": 120,
+  "daily_refill_hours": 24,
+  "stale_training_hours": 168,
+  "low_queue_hours": 24,
+  "max_posts_per_24h": 30,
+  "min_gap_minutes": 20
+}
