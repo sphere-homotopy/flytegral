@@ -337,7 +337,7 @@ jobs:
           $marker = [ordered]@{
             completed_at = [DateTimeOffset]::UtcNow.ToString('o')
             run_id = [long]$env:GITHUB_RUN_ID
-            head_sha = [string]$env:GITHUB_SHA
+            head_sha = (& git rev-parse HEAD).Trim()
             current_checkpoint = [string]$state.current_checkpoint
             queue_horizon_at = [string]$state.queue_horizon_at
           }
@@ -345,7 +345,7 @@ jobs:
           $bytes = [System.Text.UTF8Encoding]::new($false).GetBytes($json + "`n")
           $content = [Convert]::ToBase64String($bytes)
           $api = "repos/$env:GITHUB_REPOSITORY/contents/.github/fly-tweets-last-success.json"
-          $current = gh api "$api?ref=feature/fly-tweets-v1" | ConvertFrom-Json
+          $current = gh api "${api}?ref=feature/fly-tweets-v1" | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0) { throw 'Could not read Fly Tweets success marker.' }
           $body = [ordered]@{
             message = "ops: record successful Fly Tweets daily $env:GITHUB_RUN_ID"
