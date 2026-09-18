@@ -1,6 +1,11 @@
 name: Fly Tweets orchestrator
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/fly-tweets-orchestrator.yml
   schedule:
     - cron: '37 * * * *'
   workflow_dispatch:
