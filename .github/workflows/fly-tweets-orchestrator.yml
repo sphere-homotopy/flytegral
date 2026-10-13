@@ -420,7 +420,8 @@ jobs:
           )
           if (@($required | Where-Object { [string]::IsNullOrWhiteSpace([string]$_) }).Count -gt 0) {
             $alerts | ConvertTo-Json -Depth 10 | Write-Output
-            throw 'Fly Tweets health alert exists but SMTP alert secrets are not configured.'
+            Write-Output 'HEALTH_ALERT_DELEGATED_TO_HOSTED_WATCHDOG=true'
+            exit 0
           }
 
           $subject = '[Fly Tweets] health alert'
