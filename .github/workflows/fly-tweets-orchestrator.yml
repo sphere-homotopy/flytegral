@@ -256,6 +256,7 @@ jobs:
             --metrics-jsonl $env:FLYTWEETS_METRICS_LATEST
 
       - name: Run cadence-owned daily cycle
+        id: run_cycle
         run: |
           $ErrorActionPreference = 'Stop'
           $requestDate = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
@@ -384,9 +385,15 @@ jobs:
           FLYTWEETS_SMTP_PASSWORD: ${{ secrets.FLYTWEETS_SMTP_PASSWORD }}
         run: |
           $ErrorActionPreference = 'Stop'
-          if (-not (Test-Path $env:FLYTWEETS_CYCLE_RESULT)) {
-            Write-Output 'No cycle result exists; earlier infrastructure/transport step failed.'
+          # A saved last-cycle-result.json may belong to a previous successful run.
+          # A failed preparation/sync step MUST NOT report that stale result as health.
+          if ('${{ steps.run_cycle.outcome }}' -ne 'success') {
+            Write-Output 'HEALTH_ALERT_DELEGATED_TO_HOSTED_WATCHDOG=true'
             exit 0
+          }
+          if ([string]::IsNullOrWhiteSpace($env:FLYTWEETS_CYCLE_RESULT) -or
+              -not (Test-Path $env:FLYTWEETS_CYCLE_RESULT)) {
+            throw 'Successful daily cycle did not produce an accessible result path.'
           }
           $cycle = Get-Content -Raw $env:FLYTWEETS_CYCLE_RESULT | ConvertFrom-Json
           $alerts = @($cycle.alerts)
