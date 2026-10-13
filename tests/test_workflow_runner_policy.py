@@ -68,7 +68,9 @@ def test_initial_pretrain_is_bounded_and_has_no_buffer_transport_credentials():
 def test_daily_worker_is_native_headless_and_cadence_owned():
     text = (WORKFLOW_DIR / "fly-tweets-daily.yml").read_text(encoding="utf-8")
 
-    assert "schedule:" in text
+    assert "workflow_dispatch:" in text
+    assert "\n  schedule:" not in text  # main's hosted orchestrator owns the schedule
+    assert "\n  push:" not in text  # merging fixes must not start another daily
     assert EXPECTED_SELF_HOSTED_RUNNER in text
     assert "-NoProfile -NonInteractive" in text
     assert "run_daily_text_training.py" in text

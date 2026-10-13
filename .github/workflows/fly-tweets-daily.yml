@@ -1,14 +1,8 @@
 name: Fly Tweets daily
 
+# The production scheduler is fly-tweets-orchestrator.yml on main.
+# This legacy worker is manual-only to avoid a second concurrent daily cycle.
 on:
-  push:
-    branches:
-      - feature/fly-tweets-v1
-    paths:
-      - .github/workflows/fly-tweets-daily.yml
-      - .github/fly-tweets-daily-kick
-  schedule:
-    - cron: '17 3 * * *'
   workflow_dispatch:
 
 permissions:
