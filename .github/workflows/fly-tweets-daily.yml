@@ -41,10 +41,23 @@ jobs:
           $venv = Join-Path $root '.venv'
           New-Item -ItemType Directory -Force -Path $root,$state,$runs,$graph | Out-Null
 
-          if (-not (Test-Path (Join-Path $venv 'Scripts\python.exe'))) {
-            py -3.12 -m venv $venv
-          }
           $python = Join-Path $venv 'Scripts\python.exe'
+          $venvHealthy = $false
+          if (Test-Path $python) {
+            try {
+              $probe = & $python -c 'import sys; print(sys.version_info[:2] == (3, 12))' 2>$null
+              $venvHealthy = ($LASTEXITCODE -eq 0) -and (($probe | Out-String).Trim() -eq 'True')
+            } catch {
+              $venvHealthy = $false
+            }
+          }
+          if (-not $venvHealthy) {
+            if (Test-Path $venv) {
+              Move-Item $venv "$venv.broken-$(Get-Date -Format 'yyyyMMddTHHmmss')" -ErrorAction Stop
+            }
+            py -3.12 -m venv $venv
+            if ($LASTEXITCODE -ne 0) { throw 'Could not recreate Fly Tweets Python venv.' }
+          }
           & $python -m pip install --upgrade pip
           & $python -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch>=2.6'
           & $python -m pip install -e '.[dev]'
