@@ -256,16 +256,26 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $metrics = Join-Path $env:FLYTWEETS_STATE_DIR 'metrics-latest.jsonl'
-          node collect-fly-tweet-stats.js --input $env:FLYTWEETS_METRICS_TARGETS --output $metrics
+          # Do not reuse old measurements if the collector fails before writing.
+          if (Test-Path $metrics) { Remove-Item -LiteralPath $metrics -Force }
           "FLYTWEETS_METRICS_LATEST=$metrics" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          node collect-fly-tweet-stats.js --input $env:FLYTWEETS_METRICS_TARGETS --output $metrics
 
       - name: Merge fresh metrics when available
-        if: steps.collect_stats.outcome == 'success'
+        if: steps.collect_stats.outcome == 'success' || steps.collect_stats.outcome == 'failure'
         run: |
           $ErrorActionPreference = 'Stop'
+          # Collector can fail after persisting several legitimate observations.
+          # Retain that partial snapshot instead of discarding all engagement.
+          if ([string]::IsNullOrWhiteSpace($env:FLYTWEETS_METRICS_LATEST) -or
+              -not (Test-Path $env:FLYTWEETS_METRICS_LATEST)) {
+            Write-Output 'METRICS_PARTIAL_MERGE_SKIPPED_NO_FILE=true'
+            exit 0
+          }
           & $env:FLYTWEETS_PYTHON scripts/merge_fly_tweet_stats.py `
             --rows-json $env:FLYTWEETS_ROWS `
             --metrics-jsonl $env:FLYTWEETS_METRICS_LATEST
+          if ($LASTEXITCODE -ne 0) { throw 'Fly metrics merge failed.' }
 
       - name: Run cadence-owned daily cycle
         id: run_cycle
