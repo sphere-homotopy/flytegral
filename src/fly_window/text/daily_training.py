@@ -181,12 +181,14 @@ def daily_policy_objective(
     vocabulary: FlyVocabulary,
     examples: Sequence[TrainingExample],
     config: DailyTrainingConfig,
+    verify_anchor: bool = True,
 ) -> DailyPolicyObjective:
     if not examples:
         raise ValueError("no unconsumed training examples")
     if policy.vocab_size != len(vocabulary):
         raise ValueError("policy vocabulary size does not match vocabulary")
-    _assert_compatible_anchor(policy, anchor_policy)
+    if verify_anchor:
+        _assert_compatible_anchor(policy, anchor_policy)
 
     device = policy.input_gain.device
     if anchor_policy.input_gain.device != device:
@@ -277,7 +279,16 @@ def apply_daily_policy_update(
     trainable = [parameter for parameter in policy.parameters() if parameter.requires_grad]
     if not trainable:
         raise ValueError("policy has no trainable text-interface parameters")
+    if any(not example.token_ids for example in examples):
+        raise ValueError("training examples must contain at least one token")
 
+    # An individual text trajectory already creates an expensive autograd graph
+    # through the frozen connectome. Keeping all trajectories live until one
+    # backward() retained N entire graphs, exhausting Windows memory and causing
+    # a native crash in PyTorch's c10.dll. Accumulate gradients per trajectory
+    # and release each graph immediately after its own backward().
+    example_count = len(examples)
+    total_tokens = sum(len(example.token_ids) for example in examples)
     snapshot = _snapshot_state(policy)
     optimizer = torch.optim.AdamW(
         trainable,
@@ -286,21 +297,44 @@ def apply_daily_policy_update(
     )
     losses: list[float] = []
     gradient_norms: list[float] = []
-    final_objective: DailyPolicyObjective | None = None
+    final_policy_loss: float | None = None
+    final_entropy: float | None = None
+    final_anchor_kl: float | None = None
 
     try:
         for _ in range(config.max_update_steps):
             optimizer.zero_grad(set_to_none=True)
-            objective = daily_policy_objective(
-                policy,
-                anchor_policy,
-                vocabulary=vocabulary,
-                examples=examples,
-                config=config,
-            )
-            if not bool(torch.isfinite(objective.loss).item()):
-                raise FloatingPointError("daily policy objective is non-finite")
-            objective.loss.backward()
+            policy_loss_value = 0.0
+            entropy_value = 0.0
+            anchor_kl_value = 0.0
+
+            for example in examples:
+                objective = daily_policy_objective(
+                    policy,
+                    anchor_policy,
+                    vocabulary=vocabulary,
+                    examples=[example],
+                    config=config,
+                    verify_anchor=False,
+                )
+                # The original policy loss averages over examples, whereas
+                # entropy and anchor KL average over *all tokens*. These
+                # weights preserve the exact original objective and gradient
+                # even when individual tweets have different lengths.
+                token_weight = len(example.token_ids) / total_tokens
+                scaled_loss = (
+                    objective.policy_loss / example_count
+                    - config.entropy_coefficient * token_weight * objective.entropy
+                    + config.anchor_kl_coefficient * token_weight * objective.anchor_kl
+                )
+                if not bool(torch.isfinite(scaled_loss).item()):
+                    raise FloatingPointError("daily policy objective is non-finite")
+                scaled_loss.backward()
+                policy_loss_value += float(objective.policy_loss.detach().cpu()) / example_count
+                entropy_value += float(objective.entropy.detach().cpu()) * token_weight
+                anchor_kl_value += float(objective.anchor_kl.detach().cpu()) * token_weight
+                del scaled_loss, objective
+
             gradient_norm = torch.nn.utils.clip_grad_norm_(
                 trainable,
                 config.gradient_clip_norm,
@@ -310,23 +344,29 @@ def apply_daily_policy_update(
             if not _all_trainable_parameters_finite(policy):
                 raise FloatingPointError("daily update produced non-finite parameters")
 
-            losses.append(float(objective.loss.detach().cpu()))
+            losses.append(
+                policy_loss_value
+                - config.entropy_coefficient * entropy_value
+                + config.anchor_kl_coefficient * anchor_kl_value
+            )
             gradient_norms.append(float(gradient_norm.detach().cpu()))
-            final_objective = objective
+            final_policy_loss = policy_loss_value
+            final_entropy = entropy_value
+            final_anchor_kl = anchor_kl_value
     except BaseException:
         policy.load_state_dict(snapshot)
         raise
 
-    if final_objective is None:
+    if final_policy_loss is None or final_entropy is None or final_anchor_kl is None:
         raise RuntimeError("daily update completed without optimizer steps")
     return DailyUpdateStats(
-        example_count=len(examples),
+        example_count=example_count,
         update_steps=config.max_update_steps,
         losses=tuple(losses),
         gradient_norms=tuple(gradient_norms),
-        final_policy_loss=float(final_objective.policy_loss.detach().cpu()),
-        final_entropy=float(final_objective.entropy.detach().cpu()),
-        final_anchor_kl=float(final_objective.anchor_kl.detach().cpu()),
+        final_policy_loss=final_policy_loss,
+        final_entropy=final_entropy,
+        final_anchor_kl=final_anchor_kl,
     )
 
 

@@ -167,3 +167,52 @@ def test_daily_update_refuses_empty_or_already_consumed_work():
             examples=[],
             config=_config(),
         )
+
+
+def test_streamed_policy_update_matches_full_batch_objective_for_unequal_lengths():
+    vocabulary = build_v1_vocabulary()
+    examples = training_examples_from_rows(
+        [
+            _row("mixed:0", [vocabulary.id_for("theorem")], 1.0),
+            _row(
+                "mixed:1",
+                [vocabulary.id_for("proof"), vocabulary.id_for("banana"), vocabulary.id_for("bzz")],
+                -0.35,
+            ),
+        ],
+        vocabulary=vocabulary,
+    )
+    reference_policy = _policy(seed=25)
+    anchor = _policy(seed=25)
+    reference = daily_policy_objective(
+        reference_policy,
+        anchor,
+        vocabulary=vocabulary,
+        examples=examples,
+        config=_config(),
+    )
+    reference.loss.backward()
+    expected_grads = {
+        name: param.grad.detach().clone()
+        for name, param in reference_policy.named_parameters()
+        if param.grad is not None
+    }
+
+    streamed_policy = _policy(seed=25)
+    stats = apply_daily_policy_update(
+        streamed_policy,
+        _policy(seed=25),
+        vocabulary=vocabulary,
+        examples=examples,
+        config=_config(),
+    )
+    assert stats.final_policy_loss == pytest.approx(float(reference.policy_loss.detach()), abs=1e-5)
+    assert stats.final_entropy == pytest.approx(float(reference.entropy.detach()), abs=1e-5)
+    assert stats.final_anchor_kl == pytest.approx(float(reference.anchor_kl.detach()), abs=1e-5)
+    assert stats.losses[0] == pytest.approx(float(reference.loss.detach()), abs=1e-5)
+    # Clip norm derives from the accumulated per-example gradient, which should
+    # be numerically the same as one global backward() with all tweet graphs.
+    expected_norm = torch.linalg.vector_norm(
+        torch.cat([grad.reshape(-1) for grad in expected_grads.values()])
+    )
+    assert stats.gradient_norms[0] == pytest.approx(float(expected_norm), rel=1e-4)

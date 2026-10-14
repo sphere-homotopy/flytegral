@@ -221,7 +221,15 @@ def _apply_settled_rewards(
     reward_config: RewardConfig,
     now: datetime,
 ) -> int:
-    published = [row for row in rows if str(row.get("published_at", "") or "").strip()]
+    # Only genuine observed engagement can generate a training reward.
+    # Published rows without collected metrics must never be treated as
+    # zero-engagement training examples (which creates a huge bogus update).
+    published = [
+        row
+        for row in rows
+        if str(row.get("published_at", "") or "").strip()
+        and str(row.get("metrics_collected_at", "") or "").strip()
+    ]
     if not published:
         return 0
     rewarded = compute_daily_rewards(published, config=reward_config, now=now)
