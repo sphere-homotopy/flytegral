@@ -8,6 +8,75 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 
+
+_OBSERVED_FIELDS = (
+    "views", "likes", "reposts", "replies", "bookmarks", "metrics_collected_at",
+)
+_LOCAL_TRAINING_FIELDS = ("reward", "cadence_reward", "training_consumed_at")
+
+
+def reconcile_sheet_rows(
+    local_rows: Sequence[Mapping[str, object]],
+    sheet_rows: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    """Merge Sheet-authoritative delivery with locally durable learning state.
+
+    The Sheet owns Buffer/X delivery state, but regular Sheet sync responses may
+    omit X engagement and policy-consumption markers written on the PC. Never
+    roll those fields back or throw away a locally generated, unsent batch.
+    """
+    local_by_key: dict[str, dict[str, object]] = {}
+    for row in local_rows:
+        key = str(row.get("idempotency_key", "") or "").strip()
+        if not key or key in local_by_key:
+            raise ValueError(f"duplicate or missing local idempotency_key: {key}")
+        local_by_key[key] = dict(row)
+
+    merged: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for row in sheet_rows:
+        key = str(row.get("idempotency_key", "") or "").strip()
+        if not key or key in seen:
+            raise ValueError(f"duplicate or missing Sheet idempotency_key: {key}")
+        seen.add(key)
+        target = dict(row)
+        previous = local_by_key.pop(key, None)
+        if previous is not None:
+            local_metrics_at = str(previous.get("metrics_collected_at", "") or "").strip()
+            sheet_metrics_at = str(target.get("metrics_collected_at", "") or "").strip()
+
+            # Both collectors use RFC3339/ISO timestamps. If both sides have
+            # observations, keep the latest complete metric snapshot.
+            use_local_metrics = bool(local_metrics_at) and (
+                not sheet_metrics_at
+                or _parse_observation_time(local_metrics_at)
+                >= _parse_observation_time(sheet_metrics_at)
+            )
+            if use_local_metrics:
+                for field in _OBSERVED_FIELDS:
+                    if field in previous:
+                        target[field] = previous[field]
+
+            for field in _LOCAL_TRAINING_FIELDS:
+                value = previous.get(field)
+                if value not in (None, ""):
+                    target[field] = value
+        merged.append(target)
+
+    # Keep locally durable unsent rows if an Apps Script snapshot is incomplete;
+    # the next idempotent ingest will reconcile them with the Sheet.
+    merged.extend(local_by_key.values())
+    return merged
+
+
+def _parse_observation_time(value: str):
+    from datetime import datetime
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("X observation timestamp must include a timezone")
+    return parsed
+
+
 def _batch_size(row: Mapping[str, object]) -> int | None:
     try:
         value = int(row.get("batch_size", 0))
