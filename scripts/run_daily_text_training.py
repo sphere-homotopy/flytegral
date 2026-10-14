@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import faulthandler
 import json
 import subprocess
+import sys
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -25,6 +27,10 @@ from fly_window.text.generation import GenerationConfig
 from fly_window.text.policy import FlyTextPolicy
 from fly_window.text.reward import RewardConfig, compute_daily_rewards
 from fly_window.text.vocabulary import build_v1_vocabulary
+
+
+def _stage(name: str) -> None:
+    print(f"FLYTWEETS_STAGE={name}", file=sys.stderr, flush=True)
 
 
 def _git_sha() -> str:
@@ -274,6 +280,7 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    faulthandler.enable(all_threads=True)
     args = _parser().parse_args()
     try:
         request_date = datetime.strptime(args.request_date, "%Y-%m-%d").date()
@@ -304,17 +311,20 @@ def main() -> None:
     rewarded_rows = _apply_settled_rewards(rows, reward_config=reward_config, now=now)
     latest_stats = _latest_metrics_collected_at(rows)
 
+    _stage("loading_checkpoints")
     device = _resolve_device(args.device)
     current_checkpoint = _load_checkpoint(args.current_checkpoint, device)
     anchor_checkpoint = _load_checkpoint(args.anchor_checkpoint, device)
     initial_cadence_checkpoint = _load_checkpoint(args.cadence_checkpoint, device)
 
+    _stage("building_text_policy")
     policy, vocabulary = _build_policy(
         current_checkpoint,
         graph_npz=args.graph_npz,
         nodes_parquet=args.nodes_parquet,
         device=device,
     )
+    _stage("building_anchor_policy")
     anchor_policy, anchor_vocabulary = _build_policy(
         anchor_checkpoint,
         graph_npz=args.graph_npz,
@@ -329,6 +339,7 @@ def main() -> None:
         if isinstance(current_checkpoint.get("cadence_state_dict"), dict)
         else initial_cadence_checkpoint
     )
+    _stage("building_cadence_policy")
     cadence_policy, cadence_temperature, cadence_max_posts = _build_cadence_policy(
         cadence_source,
         graph_npz=args.graph_npz,
@@ -387,6 +398,7 @@ def main() -> None:
         checkpoint_tmp.replace(checkpoint_path)
         _write_json(manifest_path, dict(manifest))
 
+    _stage("starting_scheduled_cycle")
     result = run_scheduled_daily_cycle(
         policy,
         anchor_policy,
@@ -411,6 +423,7 @@ def main() -> None:
         max_posts_per_24h=max_posts_per_24h,
     )
 
+    _stage("scheduled_cycle_completed")
     _write_rows(args.rows_json, rows)
     any_training = result.training_applied or result.cadence_training_applied
     deployed_checkpoint = run_dir / "checkpoint.pt" if any_training else args.current_checkpoint
@@ -429,6 +442,7 @@ def main() -> None:
     _write_runtime_state(args.runtime_state, next_state)
     alerts = health_alerts(next_state, now=now, config=runtime_config)
 
+    _stage("durable_state_written")
     print(
         json.dumps(
             {
