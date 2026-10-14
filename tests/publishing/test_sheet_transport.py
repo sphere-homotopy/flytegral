@@ -6,6 +6,7 @@ from fly_window.publishing.sheet_transport import (
     build_fly_tweets_request,
     complete_generated_batches,
     parse_fly_tweets_response,
+    reconcile_sheet_rows,
 )
 
 
@@ -77,3 +78,22 @@ def test_parse_response_requires_rows() -> None:
 def test_parse_response_returns_sheet_rows() -> None:
     rows = [_row("b1", index, batch_size=3, status="scheduled") for index in range(3)]
     assert parse_fly_tweets_response({"ok": True, "result": {"rows": rows}}) == rows
+
+
+def test_sheet_sync_keeps_learning_fields_and_authoritative_published_status():
+    old = _row("old", 0, batch_size=1)
+    old.update({"metrics_collected_at": "2026-10-14T21:00:00Z", "views": 42,
+                "likes": 2, "reward": 0.7, "training_consumed_at": "2026-10-14T21:05:00Z"})
+    sheet = _row("old", 0, batch_size=1, status="published")
+    sheet["tweet_url"] = "https://x.com/fly_topology/status/123"
+    result = reconcile_sheet_rows([old], [sheet])
+    assert result[0]["status"] == "published"
+    assert result[0]["views"] == 42
+    assert result[0]["reward"] == 0.7
+    assert result[0]["training_consumed_at"] == old["training_consumed_at"]
+
+
+def test_sheet_sync_keeps_missing_pending_rows():
+    published = _row("first", 0, batch_size=1, status="published")
+    pending = _row("second", 0, batch_size=1)
+    assert reconcile_sheet_rows([published, pending], [published]) == [published, pending]
