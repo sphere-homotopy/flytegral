@@ -80,3 +80,16 @@ def test_missing_recent_stats_does_not_create_a_blocking_health_state():
     alerts = health_alerts(state, now=now, config=RuntimeConfig())
 
     assert alerts == ()
+
+
+def test_production_refill_window_restores_48_hour_horizon():
+    from pathlib import Path
+
+    config_file = Path(__file__).resolve().parents[2] / "configs" / "fly_tweets_runtime_v1.json"
+    config = RuntimeConfig.from_json(config_file)
+    assert config.daily_refill_hours == 48
+    now = _now()
+    stale = RuntimeState(queue_horizon_at=now - timedelta(days=20))
+    start, end = generation_window(stale, now=now, bootstrap=False, config=config)
+    assert start == now
+    assert end == now + timedelta(hours=48)
