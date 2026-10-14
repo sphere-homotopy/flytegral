@@ -49,12 +49,23 @@ function loadRows(filePath) {
     });
 }
 
-function writeAtomic(filePath, rows) {
+async function writeAtomic(filePath, rows) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const temp = `${filePath}.tmp-${process.pid}`;
   const body = rows.map((row) => JSON.stringify(row)).join('\n') + (rows.length ? '\n' : '');
   fs.writeFileSync(temp, body, 'utf8');
-  fs.renameSync(temp, filePath);
+  // Windows refuses atomic replacement while a reader/antivirus has a brief
+  // handle on the destination. Preserve the previous complete JSONL and retry
+  // rather than losing every observation after this tweet.
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    try {
+      fs.renameSync(temp, filePath);
+      return;
+    } catch (error) {
+      if (!['EPERM', 'EACCES', 'EBUSY'].includes(error.code) || attempt === 9) throw error;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(15_000, 200 * 2 ** attempt)));
+    }
+  }
 }
 
 async function assertLoggedIn(page) {
@@ -133,7 +144,7 @@ async function main() {
     for (const row of rows) {
       const metricsRow = await collectOne(page, row);
       collected.push(metricsRow);
-      writeAtomic(output, collected);
+      await writeAtomic(output, collected);
       console.log(JSON.stringify({
         event: 'metrics_collected',
         tweet_url: metricsRow.tweet_url,
