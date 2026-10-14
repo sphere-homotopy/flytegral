@@ -188,10 +188,20 @@ def apply_cadence_policy_update(
     try:
         for _ in range(config.max_update_steps):
             optimizer.zero_grad(set_to_none=True)
-            loss, policy_loss, entropy = _objective(policy, examples, config)
-            if not bool(torch.isfinite(loss).item()):
-                raise FloatingPointError("cadence objective is non-finite")
-            loss.backward()
+            # Release one cadence autograd graph before constructing the next:
+            # retaining all decisions on the 1.54M-edge connectome uses too much RAM.
+            policy_loss_value = 0.0
+            entropy_value = 0.0
+            loss_value = 0.0
+            for example in examples:
+                loss, policy_loss, entropy = _objective(policy, [example], config)
+                if not bool(torch.isfinite(loss).item()):
+                    raise FloatingPointError("cadence objective is non-finite")
+                (loss / len(examples)).backward()
+                loss_value += float(loss.detach().cpu()) / len(examples)
+                policy_loss_value += float(policy_loss.detach().cpu()) / len(examples)
+                entropy_value += float(entropy.detach().cpu()) / len(examples)
+                del loss, policy_loss, entropy
             gradient_norm = torch.nn.utils.clip_grad_norm_(
                 trainable,
                 config.gradient_clip_norm,
@@ -200,10 +210,10 @@ def apply_cadence_policy_update(
             optimizer.step()
             if not _all_trainable_parameters_finite(policy):
                 raise FloatingPointError("cadence update produced non-finite parameters")
-            losses.append(float(loss.detach().cpu()))
+            losses.append(loss_value)
             gradient_norms.append(float(gradient_norm.detach().cpu()))
-            final_policy_loss = policy_loss
-            final_entropy = entropy
+            final_policy_loss = policy_loss_value
+            final_entropy = entropy_value
     except BaseException:
         policy.load_state_dict(snapshot)
         raise
@@ -215,6 +225,6 @@ def apply_cadence_policy_update(
         update_steps=config.max_update_steps,
         losses=tuple(losses),
         gradient_norms=tuple(gradient_norms),
-        final_policy_loss=float(final_policy_loss.detach().cpu()),
-        final_entropy=float(final_entropy.detach().cpu()),
+        final_policy_loss=float(final_policy_loss),
+        final_entropy=float(final_entropy),
     )
