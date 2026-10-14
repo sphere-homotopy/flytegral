@@ -40,7 +40,15 @@ def test_published_without_observed_engagement_does_not_train():
     from datetime import UTC, datetime
 
     from fly_window.text.reward import RewardConfig
-    from scripts.run_daily_text_training import _apply_settled_rewards
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "fly_daily_training_script", REPO_ROOT / "scripts" / "run_daily_text_training.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    _apply_settled_rewards = module._apply_settled_rewards
 
     config = RewardConfig.from_json(REPO_ROOT / "configs" / "daily_reward_v1.json")
     now = datetime(2026, 10, 14, tzinfo=UTC)
