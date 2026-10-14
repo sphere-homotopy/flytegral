@@ -82,6 +82,14 @@ class FlyCadencePolicy(nn.Module):
         nn.init.zeros_(self.action_readout.bias)
 
         self.register_buffer("recurrent", recurrent.coalesce().detach())
+        # Frozen wiring: compute its coalesced transpose once instead of
+        # rebuilding an uncoalesced sparse matrix at every neuron microstep.
+        # Non-persistent buffer keeps existing model checkpoints compatible.
+        self.register_buffer(
+            "recurrent_transpose",
+            recurrent.transpose(0, 1).coalesce().detach(),
+            persistent=False,
+        )
         self.register_buffer("input_indices", torch.from_numpy(input_indices))
         self.register_buffer("output_indices", torch.from_numpy(output_indices))
 
@@ -113,12 +121,12 @@ class FlyCadencePolicy(nn.Module):
         context = context.to(device=self.input_gain.device, dtype=self.input_gain.dtype)
         activity = state.to(device=self.input_gain.device, dtype=self.input_gain.dtype)
         sensory_drive = context @ self.input_gain.transpose(0, 1) + self.input_bias
+        injected = torch.zeros_like(activity)
+        injected[:, self.input_indices] = sensory_drive
         for _ in range(self.microsteps):
             recurrent_drive = torch.sparse.mm(
-                self.recurrent.transpose(0, 1), activity.transpose(0, 1)
+                self.recurrent_transpose, activity.transpose(0, 1)
             ).transpose(0, 1)
-            injected = torch.zeros_like(activity)
-            injected[:, self.input_indices] = sensory_drive
             proposal = torch.tanh(recurrent_drive + injected)
             activity = (1.0 - self.leak) * activity + self.leak * proposal
 

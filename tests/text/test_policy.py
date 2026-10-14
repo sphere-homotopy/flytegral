@@ -89,3 +89,40 @@ def test_detach_state_breaks_autograd_history_without_changing_values():
     assert torch.equal(detached, output.state)
     assert detached.requires_grad is False
     assert detached.grad_fn is None
+
+
+def test_cached_sparse_transpose_matches_uncached_dynamics_and_gradients():
+    policy = _policy()
+    assert policy.recurrent_transpose.is_coalesced()
+    assert "recurrent_transpose" not in policy.state_dict()
+    assert torch.equal(
+        policy.recurrent_transpose.to_dense(),
+        policy.recurrent.transpose(0, 1).to_dense(),
+    )
+    ids = torch.tensor([11, 12])
+    state = policy.initial_state(batch_size=2)
+    output = policy.step(ids, state)
+    output.logits.sum().backward()
+    grads = {
+        name: param.grad.detach().clone()
+        for name, param in policy.named_parameters()
+        if param.grad is not None
+    }
+    policy.zero_grad(set_to_none=True)
+    activity = state
+    sensory = policy.token_embedding(ids)
+    drive = sensory @ policy.input_gain.transpose(0, 1) + policy.input_bias
+    for _ in range(policy.microsteps):
+        recurrent = torch.sparse.mm(
+            policy.recurrent.transpose(0, 1), activity.transpose(0, 1)
+        ).transpose(0, 1)
+        injected = torch.zeros_like(activity)
+        injected[:, policy.input_indices] = drive
+        proposal = torch.tanh(recurrent + injected)
+        activity = (1.0 - policy.leak) * activity + policy.leak * proposal
+    reference_logits = policy.readout(activity[:, policy.output_indices])
+    assert torch.allclose(output.logits, reference_logits, atol=1e-6)
+    reference_logits.sum().backward()
+    for name, parameter in policy.named_parameters():
+        if name in grads:
+            assert torch.allclose(parameter.grad, grads[name], atol=1e-6), name
