@@ -10,6 +10,7 @@ from fly_window.publishing.sheet_transport import (
     load_rows,
     load_transport_endpoint,
     post_fly_tweets_request,
+    reconcile_sheet_rows,
     write_rows_atomic,
 )
 
@@ -31,8 +32,9 @@ def main() -> None:
             endpoint,
             build_fly_tweets_request("sync"),
         )
-        write_rows_atomic(args.rows_json, remote_rows)
-        print(json.dumps({"action": "sync", "rows": len(remote_rows)}, sort_keys=True))
+        reconciled = reconcile_sheet_rows(rows, remote_rows)
+        write_rows_atomic(args.rows_json, reconciled)
+        print(json.dumps({"action": "sync", "rows": len(reconciled)}, sort_keys=True))
         return
 
     batches = complete_generated_batches(rows)
@@ -47,6 +49,7 @@ def main() -> None:
             endpoint,
             build_fly_tweets_request("ingest", batch_rows),
         )
+        remote_rows = reconcile_sheet_rows(rows, remote_rows)
         write_rows_atomic(args.rows_json, remote_rows)
         submitted += 1
 
