@@ -100,9 +100,35 @@ jobs:
             py -3.12 -m venv $venv
             if ($LASTEXITCODE -ne 0) { throw 'Could not recreate Fly Tweets Python venv.' }
           }
-          & $python -m pip install --upgrade pip
-          & $python -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch>=2.6'
-          & $python -m pip install -e '.[dev]'
+          # An already healthy editable venv must survive transient DNS outages.
+          # Package installs are only required if dependencies have changed.
+          $depsStamp = Join-Path $venv '.fly-deps-sha256'
+          $depsHash = (Get-FileHash 'pyproject.toml' -Algorithm SHA256).Hash
+          $depsCurrent = (Test-Path $depsStamp) -and
+            ((Get-Content -Raw $depsStamp).Trim() -eq $depsHash)
+          $importsHealthy = $false
+          if ($venvHealthy) {
+            try {
+              $probe = & $python -c 'import torch, fly_window, numpy, pandas, pyarrow, httpx; print(torch.__version__.split("+")[0])' 2>$null
+              $importsHealthy = ($LASTEXITCODE -eq 0) -and (-not [string]::IsNullOrWhiteSpace(($probe | Out-String).Trim()))
+            } catch { $importsHealthy = $false }
+          }
+          if ($importsHealthy -and (-not (Test-Path $depsStamp))) {
+            # Adopt existing persistent venv installed by the previous workflow.
+            $depsHash | Out-File -FilePath $depsStamp -Encoding ascii
+            $depsCurrent = $true
+          }
+          if ($importsHealthy -and $depsCurrent) {
+            Write-Output 'FLYTWEETS_VENV_CACHE_HIT=true'
+          } else {
+            & $python -m pip install --upgrade pip
+            if ($LASTEXITCODE -ne 0) { throw 'Fly pip upgrade failed.' }
+            & $python -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch>=2.6'
+            if ($LASTEXITCODE -ne 0) { throw 'Fly PyTorch install failed.' }
+            & $python -m pip install -e '.[dev]'
+            if ($LASTEXITCODE -ne 0) { throw 'Fly dependency install failed.' }
+            $depsHash | Out-File -FilePath $depsStamp -Encoding ascii
+          }
 
           "FLYTEGRAL_RUNTIME=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "FLYTWEETS_STATE_DIR=$state" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -193,6 +219,8 @@ jobs:
             --outbox-jsonl $env:FLYTWEETS_OUTBOX
 
       - name: Flush pending local batches to Google Sheet
+        id: flush_previous
+        continue-on-error: true
         run: |
           $ErrorActionPreference = 'Stop'
           & $env:FLYTWEETS_PYTHON scripts/sync_fly_tweets_sheet.py `
@@ -201,6 +229,8 @@ jobs:
             --transport-config $env:FLYTWEETS_SHEET_TRANSPORT_CONFIG
 
       - name: Sync Google Sheet state before stats
+        id: sync_sheet_state
+        continue-on-error: true
         run: |
           $ErrorActionPreference = 'Stop'
           & $env:FLYTWEETS_PYTHON scripts/sync_fly_tweets_sheet.py `
@@ -238,6 +268,8 @@ jobs:
           Write-Output "METRICS_TARGET_COUNT=$($eligible.Count)"
 
       - name: Prepare headless X metrics collector
+        id: prepare_collector
+        continue-on-error: true
         if: env.FLYTWEETS_METRICS_TARGET_COUNT != '0'
         working-directory: collector
         run: |
@@ -247,7 +279,7 @@ jobs:
 
       - name: Collect X stats headlessly
         id: collect_stats
-        if: env.FLYTWEETS_METRICS_TARGET_COUNT != '0'
+        if: env.FLYTWEETS_METRICS_TARGET_COUNT != '0' && steps.prepare_collector.outcome == 'success'
         continue-on-error: true
         working-directory: collector
         env:
