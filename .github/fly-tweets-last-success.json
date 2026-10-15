@@ -1,6 +1,7 @@
 {
-  "completed_at": "2026-09-17T23:51:03Z",
-  "run_id": 35287520684,
-  "head_sha": "e14ee649f9490ac797b2f2de9ddaf187ef83848f",
-  "source": "production-e2e"
+    "completed_at":  "2026-10-15T08:19:45.9861509+00:00",
+    "run_id":  38703371532,
+    "head_sha":  "87b5f7026268ee7b44d07a822b55f6272f3c9890",
+    "current_checkpoint":  "daily-2026-10-14-a1",
+    "queue_horizon_at":  "2026-10-19T21:55:53.835284+00:00"
 }
