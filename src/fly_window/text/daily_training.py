@@ -24,6 +24,7 @@ class DailyTrainingConfig:
     anchor_kl_coefficient: float
     gradient_clip_norm: float
     max_update_steps: int
+    training_mode: str = "full"
 
     def __post_init__(self) -> None:
         finite_nonnegative = {
@@ -40,6 +41,8 @@ class DailyTrainingConfig:
             raise ValueError("gradient_clip_norm must be finite and positive")
         if self.max_update_steps <= 0:
             raise ValueError("max_update_steps must be positive")
+        if self.training_mode not in ("full", "readout_only"):
+            raise ValueError("training_mode must be full or readout_only")
 
     @classmethod
     def from_json(cls, path: Path) -> "DailyTrainingConfig":
@@ -54,6 +57,7 @@ class DailyTrainingConfig:
                 anchor_kl_coefficient=float(payload["anchor_kl_coefficient"]),
                 gradient_clip_norm=float(payload["gradient_clip_norm"]),
                 max_update_steps=int(payload["max_update_steps"]),
+                training_mode=str(payload.get("training_mode", "full")),
             )
         except KeyError as error:
             raise ValueError(f"daily training config missing {error.args[0]}") from error
@@ -264,6 +268,164 @@ def _all_trainable_parameters_finite(policy: FlyTextPolicy) -> bool:
     )
 
 
+
+@dataclass(frozen=True, slots=True)
+class CachedReadoutTrajectory:
+    """Frozen MaleCNS motor activations for one rewarded token sequence.
+
+    This in-memory cache is valid while the input encoder and recurrent wiring
+    remain fixed. Updating only the readout does not invalidate the features.
+    """
+
+    features: torch.Tensor
+    targets: torch.Tensor
+    anchor_log_probs: torch.Tensor
+    reward: float
+
+
+def _cache_readout_trajectories(
+    policy: FlyTextPolicy,
+    anchor_policy: FlyTextPolicy,
+    *,
+    examples: Sequence[TrainingExample],
+    vocabulary: FlyVocabulary,
+) -> list[CachedReadoutTrajectory]:
+    device = policy.input_gain.device
+    if anchor_policy.input_gain.device != device:
+        raise ValueError("policy and anchor must be on the same device")
+    bos_id = vocabulary.id_for("<BOS>")
+    cached: list[CachedReadoutTrajectory] = []
+
+    # No autograd through the 1.54M-edge graph: only the trainable readout
+    # will be evaluated with gradients below.
+    with torch.no_grad():
+        for example in examples:
+            state = policy.initial_state(batch_size=1)
+            anchor_state = anchor_policy.initial_state(batch_size=1)
+            current_token = bos_id
+            features: list[torch.Tensor] = []
+            anchor_log_probs: list[torch.Tensor] = []
+            for target in example.token_ids:
+                input_ids = torch.tensor([current_token], dtype=torch.long, device=device)
+                output = policy.step(input_ids, state)
+                anchor_output = anchor_policy.step(input_ids, anchor_state)
+                if (
+                    not bool(torch.isfinite(output.state).all().item())
+                    or not bool(torch.isfinite(anchor_output.state).all().item())
+                    or not bool(torch.isfinite(anchor_output.logits).all().item())
+                ):
+                    raise FloatingPointError("non-finite frozen connectome trajectory")
+                features.append(output.state[0, policy.output_indices])
+                anchor_log_probs.append(F.log_softmax(anchor_output.logits[0], dim=-1))
+                state = output.state
+                anchor_state = anchor_output.state
+                current_token = int(target)
+            cached.append(
+                CachedReadoutTrajectory(
+                    features=torch.stack(features),
+                    targets=torch.tensor(example.token_ids, dtype=torch.long, device=device),
+                    anchor_log_probs=torch.stack(anchor_log_probs),
+                    reward=float(example.reward),
+                )
+            )
+    return cached
+
+
+def _apply_readout_only_policy_update(
+    policy: FlyTextPolicy,
+    anchor_policy: FlyTextPolicy,
+    *,
+    vocabulary: FlyVocabulary,
+    examples: Sequence[TrainingExample],
+    config: DailyTrainingConfig,
+) -> DailyUpdateStats:
+    """Train the motor readout while keeping sensory input and MaleCNS fixed.
+
+    Cached motor activations are reused across optimizer steps. This retains
+    the same policy-gradient, entropy, and anchor-KL objective as full mode,
+    restricted to the readout parameters.
+    """
+    trainable = [p for p in policy.readout.parameters() if p.requires_grad]
+    if not trainable:
+        raise ValueError("readout-only training requires a trainable readout")
+    if policy.vocab_size != len(vocabulary):
+        raise ValueError("policy vocabulary size does not match vocabulary")
+    cached = _cache_readout_trajectories(
+        policy, anchor_policy, examples=examples, vocabulary=vocabulary
+    )
+    total_tokens = sum(len(example.token_ids) for example in examples)
+    snapshot = {
+        key: value.detach().clone() for key, value in policy.readout.state_dict().items()
+    }
+    optimizer = torch.optim.AdamW(
+        trainable, lr=config.learning_rate, weight_decay=config.weight_decay
+    )
+    losses: list[float] = []
+    gradient_norms: list[float] = []
+    final_policy_loss = 0.0
+    final_entropy = 0.0
+    final_anchor_kl = 0.0
+    try:
+        for _ in range(config.max_update_steps):
+            optimizer.zero_grad(set_to_none=True)
+            policy_value = 0.0
+            entropy_value = 0.0
+            anchor_kl_value = 0.0
+            for trajectory in cached:
+                logits = policy.readout(trajectory.features)
+                if not bool(torch.isfinite(logits).all().item()):
+                    raise FloatingPointError("non-finite readout logits")
+                log_probs = F.log_softmax(logits, dim=-1)
+                probabilities = log_probs.exp()
+                policy_loss = -trajectory.reward * (
+                    log_probs.gather(1, trajectory.targets[:, None]).mean()
+                )
+                entropy = -(probabilities * log_probs).sum(dim=-1).mean()
+                anchor_kl = (
+                    probabilities * (log_probs - trajectory.anchor_log_probs)
+                ).sum(dim=-1).mean()
+                token_weight = len(trajectory.targets) / total_tokens
+                scaled_loss = (
+                    policy_loss / len(cached)
+                    - config.entropy_coefficient * token_weight * entropy
+                    + config.anchor_kl_coefficient * token_weight * anchor_kl
+                )
+                if not bool(torch.isfinite(scaled_loss).item()):
+                    raise FloatingPointError("non-finite readout-only objective")
+                scaled_loss.backward()
+                policy_value += float(policy_loss.detach().cpu()) / len(cached)
+                entropy_value += float(entropy.detach().cpu()) * token_weight
+                anchor_kl_value += float(anchor_kl.detach().cpu()) * token_weight
+            gradient_norm = torch.nn.utils.clip_grad_norm_(
+                trainable, config.gradient_clip_norm, error_if_nonfinite=True
+            )
+            optimizer.step()
+            if not all(bool(torch.isfinite(p).all().item()) for p in trainable):
+                raise FloatingPointError("readout-only update produced non-finite parameters")
+            losses.append(
+                policy_value
+                - config.entropy_coefficient * entropy_value
+                + config.anchor_kl_coefficient * anchor_kl_value
+            )
+            gradient_norms.append(float(gradient_norm.detach().cpu()))
+            final_policy_loss = policy_value
+            final_entropy = entropy_value
+            final_anchor_kl = anchor_kl_value
+    except BaseException:
+        policy.readout.load_state_dict(snapshot)
+        raise
+
+    return DailyUpdateStats(
+        example_count=len(examples),
+        update_steps=config.max_update_steps,
+        losses=tuple(losses),
+        gradient_norms=tuple(gradient_norms),
+        final_policy_loss=final_policy_loss,
+        final_entropy=final_entropy,
+        final_anchor_kl=final_anchor_kl,
+    )
+
+
 def apply_daily_policy_update(
     policy: FlyTextPolicy,
     anchor_policy: FlyTextPolicy,
@@ -275,6 +437,13 @@ def apply_daily_policy_update(
     if not examples:
         raise ValueError("no unconsumed training examples")
     _assert_compatible_anchor(policy, anchor_policy)
+    if config.training_mode == "readout_only":
+        if any(not example.token_ids for example in examples):
+            raise ValueError("training examples must contain at least one token")
+        return _apply_readout_only_policy_update(
+            policy, anchor_policy, vocabulary=vocabulary,
+            examples=examples, config=config,
+        )
 
     trainable = [parameter for parameter in policy.parameters() if parameter.requires_grad]
     if not trainable:

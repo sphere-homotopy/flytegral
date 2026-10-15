@@ -216,3 +216,81 @@ def test_streamed_policy_update_matches_full_batch_objective_for_unequal_lengths
         torch.cat([grad.reshape(-1) for grad in expected_grads.values()])
     )
     assert stats.gradient_norms[0] == pytest.approx(float(expected_norm), rel=1e-4)
+
+
+def test_readout_only_matches_full_objective_gradient_for_readout():
+    vocabulary = build_v1_vocabulary()
+    examples = training_examples_from_rows(
+        [
+            _row("a", [vocabulary.id_for("theorem")], 0.8),
+            _row("b", [vocabulary.id_for("proof"), vocabulary.id_for("banana")], -0.4),
+        ],
+        vocabulary=vocabulary,
+    )
+    reference = _policy(seed=31)
+    anchor = _policy(seed=31)
+    objective = daily_policy_objective(
+        reference, anchor, vocabulary=vocabulary,
+        examples=examples, config=_config(),
+    )
+    objective.loss.backward()
+    expected_readout_gradient_norm = torch.linalg.vector_norm(
+        torch.cat([
+            reference.readout.weight.grad.reshape(-1),
+            reference.readout.bias.grad.reshape(-1),
+        ])
+    )
+    fast = _policy(seed=31)
+    encoder_before = {
+        name: param.detach().clone()
+        for name, param in fast.named_parameters()
+        if not name.startswith("readout.")
+    }
+    stats = apply_daily_policy_update(
+        fast, _policy(seed=31), vocabulary=vocabulary,
+        examples=examples, config=_config(training_mode="readout_only"),
+    )
+    assert stats.final_policy_loss == pytest.approx(float(objective.policy_loss.detach()), abs=1e-5)
+    assert stats.final_entropy == pytest.approx(float(objective.entropy.detach()), abs=1e-5)
+    assert stats.final_anchor_kl == pytest.approx(float(objective.anchor_kl.detach()), abs=1e-5)
+    assert stats.gradient_norms[0] == pytest.approx(float(expected_readout_gradient_norm), rel=1e-4)
+    assert all(torch.equal(dict(fast.named_parameters())[n], p) for n, p in encoder_before.items())
+    assert all(param.grad is None for name, param in fast.named_parameters() if not name.startswith("readout."))
+    assert any(not torch.equal(getattr(fast.readout, n), getattr(reference.readout, n)) for n in ("weight", "bias"))
+
+
+def test_readout_only_reuses_cached_features_across_optimizer_steps(monkeypatch):
+    vocabulary = build_v1_vocabulary()
+    tokens = [vocabulary.id_for("theorem"), vocabulary.id_for("proof")]
+    examples = training_examples_from_rows(
+        [_row("cached", tokens, 1.0)], vocabulary=vocabulary
+    )
+    policy = _policy(seed=43)
+    anchor = _policy(seed=43)
+    count = {"forward": 0}
+    original_step = policy.step
+
+    def counted_step(token_ids, state):
+        count["forward"] += 1
+        return original_step(token_ids, state)
+
+    monkeypatch.setattr(policy, "step", counted_step)
+    stats = apply_daily_policy_update(
+        policy, anchor, vocabulary=vocabulary, examples=examples,
+        config=_config(training_mode="readout_only", max_update_steps=3),
+    )
+    assert stats.update_steps == 3
+    assert count["forward"] == len(tokens)
+    assert all(torch.isfinite(torch.tensor(value)) for value in stats.losses)
+
+
+def test_production_daily_config_defaults_to_readout_only():
+    from pathlib import Path
+
+    config_path = Path(__file__).resolve().parents[2] / "configs" / "daily_training_v1.json"
+    assert DailyTrainingConfig.from_json(config_path).training_mode == "readout_only"
+
+
+def test_invalid_readout_training_mode_rejected():
+    with pytest.raises(ValueError, match="training_mode"):
+        _config(training_mode="invalid")
