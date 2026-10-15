@@ -279,6 +279,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-tokens", type=int, default=96)
     parser.add_argument("--max-chars", type=int, default=240)
     parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--skip-training", action="store_true", help="Generate from the last deployed checkpoint; never consume rewards.")
+    mode.add_argument("--skip-generation", action="store_true", help="Train for future runs without generating or scheduling tweets.")
     parser.add_argument(
         "--now",
         default="",
@@ -429,6 +432,8 @@ def main() -> None:
         append_rows=lambda new_rows: _append_outbox(args.outbox_jsonl, new_rows),
         cadence_temperature=cadence_temperature,
         max_posts_per_24h=max_posts_per_24h,
+        training_enabled=not args.skip_training,
+        generation_enabled=not args.skip_generation,
     )
 
     _stage("scheduled_cycle_completed")
@@ -443,8 +448,8 @@ def main() -> None:
         started_at=runtime_state.started_at or now,
         last_stats_at=last_stats_at,
         last_training_at=now if any_training else runtime_state.last_training_at,
-        last_generation_at=now,
-        queue_horizon_at=window_end,
+        last_generation_at=runtime_state.last_generation_at if args.skip_generation else now,
+        queue_horizon_at=runtime_state.queue_horizon_at if args.skip_generation else window_end,
         current_checkpoint=result.checkpoint_id,
     )
     _write_runtime_state(args.runtime_state, next_state)
@@ -457,6 +462,8 @@ def main() -> None:
                 "request_date": occurrence,
                 "attempt": args.attempt,
                 "bootstrap": bootstrap,
+                "generation_enabled": not args.skip_generation,
+                "training_enabled": not args.skip_training,
                 "training_applied": result.training_applied,
                 "cadence_training_applied": result.cadence_training_applied,
                 "rewarded_rows": rewarded_rows,
