@@ -390,13 +390,13 @@ jobs:
           $api = "repos/$env:GITHUB_REPOSITORY/contents/.github/fly-tweets-last-success.json"
           $current = gh api "${api}?ref=feature/fly-tweets-v1" | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0) { throw 'Could not read Fly Tweets success marker.' }
-          $body = [ordered]@{
-            message = "ops: record successful Fly Tweets daily $env:GITHUB_RUN_ID"
-            content = $content
-            branch = 'feature/fly-tweets-v1'
-            sha = [string]$current.sha
-          } | ConvertTo-Json -Depth 5
-          $body | gh api --method PUT $api --input -
+          # Use gh's JSON field serialization rather than piping JSON via Windows
+          # PowerShell: native-command stdin encoding can corrupt the request body.
+          gh api --method PUT $api `
+            --raw-field "message=ops: record successful Fly Tweets daily $env:GITHUB_RUN_ID" `
+            --raw-field "content=$content" `
+            --raw-field "branch=feature/fly-tweets-v1" `
+            --raw-field "sha=$($current.sha)"
           if ($LASTEXITCODE -ne 0) { throw 'Could not update Fly Tweets success marker.' }
 
       - name: Deliver health alert when required
