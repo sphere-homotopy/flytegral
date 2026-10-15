@@ -31,6 +31,8 @@ def test_daily_training_cli_exposes_durable_transaction_inputs():
         "--training-config",
         "--cadence-training-config",
         "--base-seed",
+        "--skip-training",
+        "--skip-generation",
     ):
         assert option in result.stdout
     assert "--generation-count" not in result.stdout

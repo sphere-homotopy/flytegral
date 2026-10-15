@@ -297,3 +297,73 @@ def test_cycle_consumes_cadence_only_missed_penalty_without_text_training():
     assert result.consumed_keys == ("missed:0",)
     assert rows[0]["training_consumed_at"] != ""
     assert len(written) == 1
+
+
+def test_independent_generation_preserves_pending_rewards_and_never_updates_checkpoint():
+    policy, anchor, cadence, vocabulary = _policies()
+    _force_wait_20(cadence)
+    rows = [_rewarded_row(vocabulary)]
+    start, end = _window()
+    saved, appended = [], []
+    result = run_scheduled_daily_cycle(
+        policy, anchor, cadence, vocabulary=vocabulary, rows=rows,
+        training_config=_training_config(),
+        generation_config=GenerationConfig(max_tokens=1),
+        current_checkpoint_id="current", next_checkpoint_id="unused",
+        batch_id="split-batch", git_sha="abc123",
+        text_seed=123, cadence_seed=124,
+        window_start=start, window_end=end, now=start,
+        write_checkpoint=lambda *args: saved.append(args),
+        append_rows=lambda items: appended.extend(items),
+        training_enabled=False, generation_enabled=True,
+    )
+    assert result.training_applied is False
+    assert result.checkpoint_id == "current"
+    assert len(appended) == 2
+    assert saved == []
+    assert rows[0]["training_consumed_at"] == ""
+
+
+def test_independent_training_updates_checkpoint_but_never_touches_outbox():
+    policy, anchor, cadence, vocabulary = _policies()
+    _force_wait_20(cadence)
+    rows = [_rewarded_row(vocabulary)]
+    start, end = _window()
+    saved, appended = [], []
+    result = run_scheduled_daily_cycle(
+        policy, anchor, cadence, vocabulary=vocabulary, rows=rows,
+        training_config=_training_config(),
+        generation_config=GenerationConfig(max_tokens=1),
+        current_checkpoint_id="current", next_checkpoint_id="new",
+        batch_id="split-batch", git_sha="abc123",
+        text_seed=123, cadence_seed=124,
+        window_start=start, window_end=end, now=start,
+        write_checkpoint=lambda *args: saved.append(args),
+        append_rows=lambda items: appended.extend(items),
+        training_enabled=True, generation_enabled=False,
+    )
+    assert result.training_applied is True
+    assert result.checkpoint_id == "new"
+    assert result.generated_rows == ()
+    assert result.publish_times == ()
+    assert len(saved) == 1
+    assert appended == []
+    assert rows[0]["training_consumed_at"] != ""
+
+
+def test_independent_cycle_cannot_skip_both_training_and_generation():
+    policy, anchor, cadence, vocabulary = _policies()
+    start, end = _window()
+    with pytest.raises(ValueError, match="at least one"):
+        run_scheduled_daily_cycle(
+            policy, anchor, cadence, vocabulary=vocabulary, rows=[],
+            training_config=_training_config(),
+            generation_config=GenerationConfig(max_tokens=1),
+            current_checkpoint_id="current", next_checkpoint_id="unused",
+            batch_id="split-batch", git_sha="abc123",
+            text_seed=123, cadence_seed=124,
+            window_start=start, window_end=end, now=start,
+            write_checkpoint=lambda *args: None,
+            append_rows=lambda items: None,
+            training_enabled=False, generation_enabled=False,
+        )

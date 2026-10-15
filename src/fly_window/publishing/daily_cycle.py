@@ -79,8 +79,12 @@ def run_scheduled_daily_cycle(
     cadence_training_config: CadenceTrainingConfig | None = None,
     cadence_temperature: float = 1.0,
     max_posts_per_24h: int = 30,
+    training_enabled: bool = True,
+    generation_enabled: bool = True,
 ) -> ScheduledDailyCycleResult:
-    """Run one production cycle where engagement updates text and cadence policies."""
+    """Run independent generation, independent learning, or the legacy combined cycle."""
+    if not training_enabled and not generation_enabled:
+        raise ValueError("at least one of training_enabled or generation_enabled is required")
     current_checkpoint = str(current_checkpoint_id).strip()
     next_checkpoint = str(next_checkpoint_id).strip()
     batch = str(batch_id).strip()
@@ -99,10 +103,10 @@ def run_scheduled_daily_cycle(
     if window_end <= window_start:
         raise ValueError("window_end must be later than window_start")
 
-    examples = training_examples_from_rows(rows, vocabulary=vocabulary)
-    cadence_examples = cadence_training_examples_from_rows(
-        rows,
-        action_count=cadence_policy.action_count,
+    examples = training_examples_from_rows(rows, vocabulary=vocabulary) if training_enabled else []
+    cadence_examples = (
+        cadence_training_examples_from_rows(rows, action_count=cadence_policy.action_count)
+        if training_enabled else []
     )
     text_consumed_keys = {example.idempotency_key for example in examples}
     cadence_consumed_keys = {example.idempotency_key for example in cadence_examples}
@@ -194,38 +198,43 @@ def run_scheduled_daily_cycle(
                 checkpoint_manifest,
             )
 
-        decisions = sample_publish_decisions(
-            cadence_policy,
-            start=window_start,
-            end=window_end,
-            seed=int(cadence_seed),
-            temperature=cadence_temperature,
-            max_posts_per_24h=max_posts_per_24h,
-        )
-        publish_times = tuple(decision.publish_at for decision in decisions)
-        generated = generate_batch(
-            policy,
-            vocabulary,
-            base_seed=int(text_seed),
-            config=generation_config,
-            checkpoint_id=active_checkpoint,
-            git_sha=sha,
-            batch_id=batch,
-            count=len(decisions),
-        )
-        batch_size = len(decisions)
-        generated_rows = [
-            generated_tweet_row(
-                tweet,
-                generated_at=now,
-                scheduled_at=decision.publish_at,
-                batch_size=batch_size,
-                cadence_context=decision.context,
-                cadence_action=decision.action,
+        if generation_enabled:
+            decisions = sample_publish_decisions(
+                cadence_policy,
+                start=window_start,
+                end=window_end,
+                seed=int(cadence_seed),
+                temperature=cadence_temperature,
+                max_posts_per_24h=max_posts_per_24h,
             )
-            for tweet, decision in zip(generated, decisions, strict=True)
-        ]
-        append_rows(generated_rows)
+            publish_times = tuple(decision.publish_at for decision in decisions)
+            generated = generate_batch(
+                policy,
+                vocabulary,
+                base_seed=int(text_seed),
+                config=generation_config,
+                checkpoint_id=active_checkpoint,
+                git_sha=sha,
+                batch_id=batch,
+                count=len(decisions),
+            )
+            batch_size = len(decisions)
+            generated_rows = [
+                generated_tweet_row(
+                    tweet,
+                    generated_at=now,
+                    scheduled_at=decision.publish_at,
+                    batch_size=batch_size,
+                    cadence_context=decision.context,
+                    cadence_action=decision.action,
+                )
+                for tweet, decision in zip(generated, decisions, strict=True)
+            ]
+            append_rows(generated_rows)
+        else:
+            # Do not touch the durable outbox in a training-only invocation.
+            publish_times = ()
+            generated_rows = []
 
         if any_training_applied:
             consumed_at = now.isoformat()
