@@ -334,6 +334,7 @@ jobs:
             --graph-npz $env:FLYTWEETS_GRAPH_NPZ `
             --nodes-parquet $env:FLYTWEETS_GRAPH_NODES `
             --base-seed $seed `
+            --skip-training `
             --device cpu
           $cycleExit = $LASTEXITCODE
           Write-Output "FLYTWEETS_DAILY_EXIT_CODE=$cycleExit"
@@ -433,6 +434,63 @@ jobs:
             --raw-field "branch=feature/fly-tweets-v1" `
             --raw-field "sha=$($current.sha)"
           if ($LASTEXITCODE -ne 0) { throw 'Could not update Fly Tweets success marker.' }
+
+      - name: Train Fly for future cycles (nonblocking)
+        id: train_only
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Publications and the durable GitHub success marker are committed
+          # BEFORE this independent training process. Even a native PyTorch crash
+          # cannot invalidate today's delivery or trigger duplicate generation.
+          $rows = @(Get-Content -Raw $env:FLYTWEETS_ROWS | ConvertFrom-Json)
+          $pending = @($rows | Where-Object {
+            [string]::IsNullOrWhiteSpace([string]$_.training_consumed_at) -and
+            (
+              -not [string]::IsNullOrWhiteSpace([string]$_.reward) -or
+              (-not [string]::IsNullOrWhiteSpace([string]$_.cadence_reward) -and
+               -not [string]::IsNullOrWhiteSpace([string]$_.cadence_context))
+            )
+          })
+          if ($pending.Count -eq 0) {
+            Write-Output 'FLYTWEETS_TRAINING_SKIPPED_NO_NEW_REWARDS=true'
+            exit 0
+          }
+          $requestDate = [DateTimeOffset]::UtcNow.ToString('yyyy-MM-dd')
+          $seed = [int]([DateTimeOffset]::UtcNow.ToString('yyyyMMdd'))
+          $trainOutput = & $env:FLYTWEETS_PYTHON scripts/run_daily_text_training.py `
+            --request-date $requestDate `
+            --attempt 1 `
+            --current-checkpoint $env:FLYTWEETS_CURRENT_CHECKPOINT `
+            --anchor-checkpoint $env:FLYTWEETS_ANCHOR_CHECKPOINT `
+            --cadence-checkpoint $env:FLYTWEETS_CADENCE_CHECKPOINT `
+            --runtime-state $env:FLYTWEETS_RUNTIME_STATE `
+            --runtime-config configs/fly_tweets_runtime_v1.json `
+            --rows-json $env:FLYTWEETS_ROWS `
+            --outbox-jsonl $env:FLYTWEETS_OUTBOX `
+            --run-root $env:FLYTWEETS_RUN_ROOT `
+            --reward-config configs/daily_reward_v1.json `
+            --training-config configs/daily_training_v1.json `
+            --graph-npz $env:FLYTWEETS_GRAPH_NPZ `
+            --nodes-parquet $env:FLYTWEETS_GRAPH_NODES `
+            --base-seed $seed `
+            --skip-generation `
+            --device cpu
+          if ($LASTEXITCODE -ne 0) {
+            throw "Independent Fly training failed with Python exit code $LASTEXITCODE; generated tweets remain durable."
+          }
+          $trainResultPath = Join-Path $env:FLYTWEETS_STATE_DIR 'last-training-result.json'
+          [System.IO.File]::WriteAllLines($trainResultPath, @($trainOutput), [System.Text.UTF8Encoding]::new($false))
+          $trained = Get-Content -Raw $trainResultPath | ConvertFrom-Json
+          if ([bool]$trained.training_applied -or [bool]$trained.cadence_training_applied) {
+            $source = [string]$trained.checkpoint
+            if (-not (Test-Path $source)) { throw "Independent training checkpoint missing: $source" }
+            $temp = "$env:FLYTWEETS_CURRENT_CHECKPOINT.tmp"
+            Copy-Item -Force $source $temp
+            Move-Item -Force $temp $env:FLYTWEETS_CURRENT_CHECKPOINT
+          }
+          Write-Output "FLYTWEETS_INDEPENDENT_TRAINING_APPLIED=$($trained.training_applied)"
+          Get-Content $trainResultPath
 
       - name: Deliver health alert when required
         if: always()
