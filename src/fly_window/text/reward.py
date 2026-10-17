@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Mapping
+from collections.abc import MutableMapping, Sequence
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,3 +185,38 @@ def compute_daily_rewards(
             )
         )
     return result
+
+
+def apply_settled_rewards(
+    rows: Sequence[MutableMapping[str, object]],
+    *,
+    config: RewardConfig,
+    now: datetime,
+) -> int:
+    """Persist rewards only for genuinely observed, mature X publications.
+
+    This runs independently of generation. Consumed training examples remain
+    immutable even when a later collection reports different engagement.
+    Zero-valued metrics are valid observations; missing metrics are not.
+    """
+    fields = ("views", "likes", "reposts", "replies", "bookmarks")
+    published = [
+        row for row in rows
+        if str(row.get("published_at", "") or "").strip()
+        and str(row.get("metrics_collected_at", "") or "").strip()
+        and all(row.get(field) not in (None, "") for field in fields)
+    ]
+    if not published:
+        return 0
+    rewarded = compute_daily_rewards(published, config=config, now=now)
+    rewards = {item.idempotency_key: item.reward for item in rewarded}
+    changed = 0
+    for row in rows:
+        key = str(row.get("idempotency_key", "") or "").strip()
+        if key not in rewards or str(row.get("training_consumed_at", "") or "").strip():
+            continue
+        reward = rewards[key]
+        if row.get("reward") != reward:
+            row["reward"] = reward
+            changed += 1
+    return changed

@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from fly_window.text.reward import RewardConfig, compute_daily_rewards
+from fly_window.text.reward import RewardConfig, compute_daily_rewards, apply_settled_rewards
 
 
 NOW = datetime(2026, 9, 17, 12, 0, tzinfo=UTC)
@@ -117,3 +117,26 @@ def test_tied_raw_scores_receive_identical_rank_reward():
 
     assert by_key["a"].raw_score == by_key["b"].raw_score
     assert by_key["a"].reward == by_key["b"].reward
+
+
+def test_settlement_is_separate_from_generation_idempotent_and_requires_real_metrics():
+    rows = [
+        {**_row("real", age_hours=48, views=123),
+         "metrics_collected_at": NOW.isoformat(), "training_consumed_at": "", "reward": ""},
+        {**_row("zero", age_hours=48, views=0, likes=0, reposts=0, replies=0, bookmarks=0),
+         "metrics_collected_at": NOW.isoformat(), "training_consumed_at": "", "reward": ""},
+        {**_row("unobserved", age_hours=48, views=9999),
+         "metrics_collected_at": "", "training_consumed_at": "", "reward": ""},
+        {**_row("partial", age_hours=48),
+         "metrics_collected_at": NOW.isoformat(), "likes": "", "training_consumed_at": "", "reward": ""},
+        {**_row("young", age_hours=6),
+         "metrics_collected_at": NOW.isoformat(), "training_consumed_at": "", "reward": ""},
+    ]
+    assert apply_settled_rewards(rows, config=_config(), now=NOW) == 2
+    assert rows[0]["reward"] > rows[1]["reward"]
+    assert [row["reward"] for row in rows[2:]] == ["", "", ""]
+    assert apply_settled_rewards(rows, config=_config(), now=NOW) == 0
+    rows[0]["training_consumed_at"] = NOW.isoformat()
+    rows[0]["views"] = 100000
+    assert apply_settled_rewards(rows, config=_config(), now=NOW) == 1
+    assert rows[0]["reward"] == 1.0

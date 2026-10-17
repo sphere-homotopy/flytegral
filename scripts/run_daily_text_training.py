@@ -25,7 +25,7 @@ from fly_window.publishing.runtime import (
 from fly_window.text.daily_training import DailyTrainingConfig
 from fly_window.text.generation import GenerationConfig
 from fly_window.text.policy import FlyTextPolicy
-from fly_window.text.reward import RewardConfig, compute_daily_rewards
+from fly_window.text.reward import RewardConfig, apply_settled_rewards
 from fly_window.text.vocabulary import build_v1_vocabulary
 
 
@@ -215,34 +215,6 @@ def _append_outbox(path: Path, rows: list[dict[str, object]]) -> None:
             handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
 
 
-def _apply_settled_rewards(
-    rows: list[dict[str, object]],
-    *,
-    reward_config: RewardConfig,
-    now: datetime,
-) -> int:
-    # Only genuine observed engagement can generate a training reward.
-    # Published rows without collected metrics must never be treated as
-    # zero-engagement training examples (which creates a huge bogus update).
-    published = [
-        row
-        for row in rows
-        if str(row.get("published_at", "") or "").strip()
-        and str(row.get("metrics_collected_at", "") or "").strip()
-    ]
-    if not published:
-        return 0
-    rewarded = compute_daily_rewards(published, config=reward_config, now=now)
-    rewards = {item.idempotency_key: item.reward for item in rewarded}
-    updated = 0
-    for row in rows:
-        key = str(row.get("idempotency_key", "") or "").strip()
-        if key in rewards and not str(row.get("training_consumed_at", "") or "").strip():
-            row["reward"] = rewards[key]
-            updated += 1
-    return updated
-
-
 def _checkpoint_label(path: Path) -> str:
     return path.parent.name or path.stem
 
@@ -319,7 +291,7 @@ def main() -> None:
         max_chars=args.max_chars,
     )
     rows = _load_rows(args.rows_json)
-    rewarded_rows = _apply_settled_rewards(rows, reward_config=reward_config, now=now)
+    rewarded_rows = apply_settled_rewards(rows, config=reward_config, now=now)
     latest_stats = _latest_metrics_collected_at(rows)
 
     _stage("loading_checkpoints")
