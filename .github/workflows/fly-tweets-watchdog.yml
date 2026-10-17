@@ -67,6 +67,7 @@ jobs:
             --json databaseId,status,conclusion,createdAt,updatedAt > watchdog/runs.json
 
           python - <<'PY'
+          import base64
           import json
           import os
           import subprocess
@@ -88,8 +89,28 @@ jobs:
               raise SystemExit(0)
 
           latest = runs[0]
+          # A green 'decide' job may skip the native Windows daily job entirely.
+          # Its workflow run has no heartbeat. Follow the durable success marker
+          # written ONLY after the actual native cycle and artifact upload.
+          marker_url = f'repos/{repo}/contents/.github/fly-tweets-last-success.json?ref=feature/fly-tweets-v1'
+          marker_result = subprocess.run(
+              ['gh', 'api', marker_url], text=True, capture_output=True, check=False,
+          )
+          marker = None
+          if marker_result.returncode != 0:
+              reasons.append('cannot read durable native daily success marker')
+          else:
+              try:
+                  record = json.loads(marker_result.stdout)
+                  marker = json.loads(base64.b64decode(record['content']).decode('utf-8-sig'))
+                  int(marker['run_id'])
+              except (KeyError, ValueError, TypeError) as error:
+                  reasons.append(f'invalid durable native daily success marker: {error}')
+                  marker = None
           successful = next(
-              (run for run in runs if run.get('status') == 'completed' and run.get('conclusion') == 'success'),
+              (run for run in runs
+               if marker is not None and run.get('databaseId') == int(marker['run_id'])
+               and run.get('status') == 'completed' and run.get('conclusion') == 'success'),
               None,
           )
           if latest.get('status') == 'completed' and latest.get('conclusion') != 'success':
@@ -98,9 +119,9 @@ jobs:
               )
 
           if successful is None:
-              reasons.append('no successful native Fly Tweets daily run exists')
+              reasons.append('no completed successful native daily run matches the durable marker')
           else:
-              completed_at = parse(successful.get('updatedAt') or successful['createdAt'])
+              completed_at = parse(marker['completed_at'])
               if (now - completed_at).total_seconds() > int(os.environ['STALE_DAILY_SECONDS']):
                   reasons.append(
                       f"last successful native daily run is older than 48h: {completed_at.isoformat()}"
