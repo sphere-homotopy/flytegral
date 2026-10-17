@@ -309,6 +309,16 @@ jobs:
             --metrics-jsonl $env:FLYTWEETS_METRICS_LATEST
           if ($LASTEXITCODE -ne 0) { throw 'Fly metrics merge failed.' }
 
+      - name: Settle mature observed engagement into durable rewards
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # This must run even when generation is resumed from yesterday's
+          # durable outbox; independent training only sees persisted rewards.
+          & $env:FLYTWEETS_PYTHON scripts/settle_fly_tweet_rewards.py `
+            --rows-json $env:FLYTWEETS_ROWS `
+            --reward-config configs/daily_reward_v1.json
+          if ($LASTEXITCODE -ne 0) { throw 'Fly reward settlement failed.' }
+
       - name: Run cadence-owned daily cycle
         id: run_cycle
         run: |
@@ -329,10 +339,9 @@ jobs:
             if ($validGeneration) {
               $lastAt = [DateTimeOffset]::Parse($lastGeneration)
               $age = [DateTimeOffset]::UtcNow - $lastAt
-              $sameState = (
-                [string]$previous.current_checkpoint_id -eq [string]$durable.current_checkpoint -and
-                [string]$previous.window_end -eq [string]$durable.queue_horizon_at
-              )
+              # Independent training can advance the deployed checkpoint after
+              # this generation was committed. That is NOT a new generation.
+              $sameState = ([string]$previous.window_end -eq [string]$durable.queue_horizon_at)
               if ($age.TotalSeconds -ge 0 -and $age.TotalSeconds -lt 84600 -and
                   $sameState) {
                 if ([bool]$previous.training_applied -or
@@ -492,7 +501,7 @@ jobs:
           $seed = [int]([DateTimeOffset]::UtcNow.ToString('yyyyMMdd'))
           $trainOutput = & $env:FLYTWEETS_PYTHON scripts/run_daily_text_training.py `
             --request-date $requestDate `
-            --attempt 1 `
+            --attempt $env:GITHUB_RUN_ID `
             --current-checkpoint $env:FLYTWEETS_CURRENT_CHECKPOINT `
             --anchor-checkpoint $env:FLYTWEETS_ANCHOR_CHECKPOINT `
             --cadence-checkpoint $env:FLYTWEETS_CADENCE_CHECKPOINT `
