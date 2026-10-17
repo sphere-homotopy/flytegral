@@ -137,6 +137,7 @@ def test_settlement_is_separate_from_generation_idempotent_and_requires_real_met
     assert [row["reward"] for row in rows[2:]] == ["", "", ""]
     assert apply_settled_rewards(rows, config=_config(), now=NOW) == 0
     rows[0]["training_consumed_at"] = NOW.isoformat()
-    rows[0]["views"] = 100000
+    rows[0].update(views=0, likes=0, reposts=0, replies=0, bookmarks=0)
     assert apply_settled_rewards(rows, config=_config(), now=NOW) == 1
     assert rows[0]["reward"] == 1.0
+    assert rows[1]["reward"] == 0.0
