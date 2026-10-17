@@ -1,0 +1,72 @@
+name: Fly Tweets Cook corpus
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fly-tweets-cook-corpus
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    runs-on: [self-hosted, windows, x64, flytegral-pc]
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ". '{0}'"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/fly-tweets-v1
+
+      - name: Prepare persistent Flytegral runtime
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:LOCALAPPDATA 'flytegral\fly-tweets'
+          $output = Join-Path $root 'corpus\john-d-cook'
+          New-Item -ItemType Directory -Force -Path $output | Out-Null
+          "FLYTEGRAL_RUNTIME=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "COOK_CORPUS_OUTPUT_DIR=$output" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Output "FLYTEGRAL_RUNTIME=$root"
+          Write-Output "COMPUTER=$env:COMPUTERNAME"
+          Write-Output "USER=$env:USERNAME"
+
+      - name: Prepare Playwright collector
+        working-directory: collector
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npm install --omit=dev --no-audit --no-fund
+          npx playwright install chromium
+
+      - name: Require persistent X session
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $profile = 'C:\tools\x-stats\x-browser-profile'
+          if (-not (Test-Path $profile)) {
+            throw "X profile missing: $profile"
+          }
+          "X_PROFILE_DIR=$profile" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Output "X_PROFILE_DIR=$profile"
+
+      - name: Scrape John D Cook math accounts headlessly
+        working-directory: collector
+        env:
+          COOK_MAX_SCROLLS: '450'
+          COOK_STABLE_ROUNDS: '18'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node collect-cook-corpus.js
+
+      - name: Report corpus manifest
+        if: always()
+        run: |
+          $manifest = Join-Path $env:COOK_CORPUS_OUTPUT_DIR 'manifest.json'
+          if (-not (Test-Path $manifest)) {
+            throw "Cook corpus manifest missing: $manifest"
+          }
+          Write-Output 'COOK_CORPUS_MANIFEST_BEGIN'
+          Get-Content $manifest
+          Write-Output 'COOK_CORPUS_MANIFEST_END'

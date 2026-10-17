@@ -3,4 +3,5 @@ __pycache__/
 .pytest_cache/
 data/raw/
 artifacts/
+collector/node_modules/
 .env

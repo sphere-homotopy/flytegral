@@ -1,0 +1,23 @@
+name: TEMP Cancel wrong daily run
+
+on:
+  push:
+    branches:
+      - feature/fly-tweets-v1
+    paths:
+      - .github/workflows/temp-cancel-wrong-daily.yml
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cancel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel run 35282147852
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST repos/sphere-homotopy/flytegral/actions/runs/35282147852/cancel
+          echo "CANCEL_REQUESTED=true"
