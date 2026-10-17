@@ -316,7 +316,8 @@ jobs:
           # durable outbox; independent training only sees persisted rewards.
           & $env:FLYTWEETS_PYTHON scripts/settle_fly_tweet_rewards.py `
             --rows-json $env:FLYTWEETS_ROWS `
-            --reward-config configs/daily_reward_v1.json
+            --reward-config configs/daily_reward_v1.json `
+            --runtime-state $env:FLYTWEETS_RUNTIME_STATE
           if ($LASTEXITCODE -ne 0) { throw 'Fly reward settlement failed.' }
 
       - name: Run cadence-owned daily cycle
