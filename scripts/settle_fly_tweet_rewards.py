@@ -35,7 +35,7 @@ def advance_observation_clock(path: Path, rows: list[dict[str, object]]) -> bool
             return False
     state["last_stats_at"] = latest.isoformat()
     temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True) + "\\n", encoding="utf-8")
+    temporary.write_text(json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     temporary.replace(path)
     return True
 
