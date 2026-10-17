@@ -215,6 +215,13 @@ def _append_outbox(path: Path, rows: list[dict[str, object]]) -> None:
             handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
 
 
+def _apply_settled_rewards(
+    rows: list[dict[str, object]], *, reward_config: RewardConfig, now: datetime,
+) -> int:
+    """Compatibility wrapper for callers of the former private helper."""
+    return apply_settled_rewards(rows, config=reward_config, now=now)
+
+
 def _checkpoint_label(path: Path) -> str:
     return path.parent.name or path.stem
 
