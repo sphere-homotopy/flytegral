@@ -6,8 +6,7 @@ on:
       - main
     paths:
       - .github/workflows/fly-tweets-orchestrator.yml
-  schedule:
-    - cron: '37 * * * *'
+  # Temporarily paused by owner: no automatic Fly Tweets runs.
   workflow_dispatch:
 
 permissions:
@@ -62,7 +61,8 @@ jobs:
 
   daily:
     needs: decide
-    if: needs.decide.outputs.should_run == 'true'
+    # Owner pause: prevent manual or push-triggered runs from dispatching the publisher.
+    if: false
     runs-on: [self-hosted, windows, x64, flytegral-pc]
     timeout-minutes: 120
     defaults:
