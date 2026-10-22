@@ -24,6 +24,13 @@ def main() -> None:
     parser.add_argument("--transport-config", type=Path, required=True)
     args = parser.parse_args()
 
+    # A durable pause marker blocks transport writes even for previously queued
+    # GitHub Actions jobs that check out this branch after a restart.
+    pause_marker = Path(__file__).resolve().parents[1] / ".github" / "fly-tweets-publication-paused"
+    if args.action == "ingest" and pause_marker.is_file():
+        print(json.dumps({"action": "ingest", "paused": True, "batches": 0}, sort_keys=True))
+        return
+
     endpoint = load_transport_endpoint(args.transport_config)
     rows = load_rows(args.rows_json)
 
