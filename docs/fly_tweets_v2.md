@@ -79,6 +79,15 @@ py -3.12 scripts/preview_fly_tweets_v2.py --outbox "$env:LOCALAPPDATA\\flytegral
 
 The preview is **not the final learned generator**. Next: train a tiny stateful semantic policy using reviewed English examples from the owner corpus (with manual pairwise funny/boring labels), including return-to-topic memory and style variation. Only promote after a genuine human blind comparison and semantic plagiarism/duplication review.
 
+## Observed pilot results (2026-11-01)
+
+- The owner's October 26 X export contains **12,142** posts. The math-topic candidate filter selected **392** originals (370 RU, 22 non-Russian).
+- Local `RU → EN` translation pass is **complete as a draft**: 355 machine drafts, 15 editor drafts (11 initial + 4 manual repairs), and 22 already-English originals. These are **not** reviewed or training-approved. Automated translations demonstrably mishandle some humor, formal notation and informal idioms; human correction is required.
+- A local `.private/fly_v2_review.csv` contains **120** candidates for selective human review. None is approved by this system.
+- Using 117 saved Fly-generated rows, the offline semantic contrast decoder yielded **15** distinct-topic previews after lexical near-duplicate removal. All are `publishable: false`.
+- `@alcuintweets` and `@mouse_math` are registered as candidate sources. No complete third-party dataset has been ingested; brief retweet excerpts in the owner's archive do not constitute usable full originals.
+- This version is a **seed-bank decoder**, not a newly trained joke-producing model. We must evaluate originality, style, mathematical correctness and whether people actually find the results funny before attempting any production promotion.
+
 ## Success criteria
 
 Compare the existing generator and the experimental generator on fixed seeds. Metrics: grammatical completeness, unexpected but interpretable relation between mathematical and fly concepts, human pairwise preference, exact/near duplication, and length/EOS behavior. No automatic publishing until approved.
