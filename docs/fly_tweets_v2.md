@@ -79,6 +79,33 @@ py -3.12 scripts/preview_fly_tweets_v2.py --outbox "$env:LOCALAPPDATA\\flytegral
 
 The preview is **not the final learned generator**. Next: train a tiny stateful semantic policy using reviewed English examples from the owner corpus (with manual pairwise funny/boring labels), including return-to-topic memory and style variation. Only promote after a genuine human blind comparison and semantic plagiarism/duplication review.
 
+## Compositional semantic decoder (v1)
+
+A second decoder is implemented in `src/fly_window/text/compositional_engine.py`. It **does not assemble one of the 16 v0 complete jokes**. Instead, its output is composed from independently selected components:
+
+1. **Mathematical concept** (16 concise, hand-vetted mathematical facts with trigger words).
+2. **Physical observation** (31 fly-world scenes such as windows, lids, experiments and crumbs).
+3. **Rhetorical move** (six grammar strategies: report, objection, label, question, misclassification, diagnosis).
+
+Crucially, the three selector streams are **disjoint slices of actual sampled token IDs**: `token_ids[0::3]` for math, `[1::3]` for scene and `[2::3]` for rhetorical move. If a sampled math keyword is present in the generated text, it narrows the math concept. An independent, deterministic hashing function only maps the sampled token streams to finite choices. `rng_seed` and `idempotency_key` do **not** determine creative variables. This is fly-driven choice, **not** learning or comprehension.
+
+Mathematical concepts and scenes have explicit compatibility tags, which exclude irrelevant combinations such as a banana being classified as a topological boundary, a pigeonhole count being called compactness, or a swatter's shadow having zero Lebesgue measure. This compatibility is a curated bridge, not a proof of semantic quality. The six output structures are grammatically fixed but no complete rendered joke is stored. The result is still a rule-based compositional engine with a weak underlying neural choice signal.
+
+```powershell
+py -3.12 scripts/preview_fly_compositional.py --outbox "$env:LOCALAPPDATA\\flytegral\\fly-tweets\\state\\outbox.jsonl" --output .private/fly_v2_composed.jsonl --count 30 --max-chars 240
+```
+
+The comparison report is saved beside it as `.private/fly_v2_composed.report.json`. On 117 historical Fly rows, v0 yielded 15 non-near-duplicate captions; v1 yielded **30** captions across 15 topics, 17 concrete scenes and six rhetorical moves (240-character ceiling). The cardinality improvement proves *combinatorial diversity*, **not** that the jokes are funny or original.
+
+All outputs retain source idempotency key, chosen component IDs and `publishable: false`. The experiment cannot publish to Buffer or X.
+
+### Remaining gaps
+
+- Readability and semantic matching have improved, but recurring clauses (`i have been studying...`) sound mechanical. Some legitimate tag-compatible combinations remain boring or weakly connected.
+- Actual humor preferences, mathematical correctness and originality require review, ideally pairwise comparison against v0 and original author posts.
+- The owner's 392 selected math posts are available for *style calibration*, but machine-draft translations are not reliable positive examples. No corpus-weight learning has been applied here yet.
+- Sampling from the existing Fly policy is near uniform; the policy still needs a trained selector that can learn what kinds of combinations work.
+
 ## Observed pilot results (2026-11-01)
 
 - The owner's October 26 X export contains **12,142** posts. The math-topic candidate filter selected **392** originals (370 RU, 22 non-Russian).
