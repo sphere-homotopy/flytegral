@@ -124,6 +124,28 @@ py -3.12 scripts/compare_fly_decoders.py train --review-csv .private/fly_v2_ab_r
 
 A lightweight pairwise logistic learner adjusts interpretable *post-decoder* topic, scene, move, decoder, question and length weights. It is not training the 57k-neuron connectome, and it cannot by itself produce new sentences. With zero submitted labels, it reports `trained: false` and does not write a fake model. All evaluated texts and models stay offline; no publication hook is introduced.
 
+## Corpus-derived style calibration (v2)
+
+The third offline renderer, `src/fly_window/text/style_profile.py`, uses only the owner's `original_en` and `editor_draft` texts as stylistic examples. It excludes machine-draft translations, links, texts over 280 characters, and duplicate texts. **The corpus is used for simple style statistics, not as a stock of jokes to reuse.** It never inserts source sentences into generated posts.
+
+On the actual archived short examples (22 eligible): median **78 characters**, **54.5%** contain a question, **4.5%** begin lowercase. The decoder therefore searches several grammatical renderings of the **same Fly-chosen math topic and physical scene**, with question intent drawn from a separate deterministic transform of sampled Fly tokens. It chooses a complete, short rendering by closeness to the owner's median length and observed question share. Unlike v1 it normalizes sentence case and standalone `I`. A corpus fingerprint is included in every trace to make style provenance auditable.
+
+```powershell
+py -3.12 scripts/preview_fly_styled.py --outbox "$env:LOCALAPPDATA\\flytegral\\fly-tweets\\state\\outbox.jsonl" --owner-corpus .private/fly_tweets_owner_math_en.jsonl --output .private/fly_v2_styled.jsonl --count 30
+```
+
+The comparison is saved in `.private/fly_v2_styled.report.json`. Same saved 117 historical Fly rows, 30 outputs each:
+
+| Metric | Composition v1 | Styled composition v2 |
+|---|---:|---:|
+| Mean length | 135.9 | 82.9 |
+| Contains question | 10.0% | 56.7% |
+| Unique texts | 30 | 30 |
+| Topics | 15 | 13 |
+| Fly-world scenes | 17 | 20 |
+
+**This is not learned humor.** Both variants use hand-authored mathematical and physical facts, and v2 is still visibly formulaic (`Is this ...?`, `Field note on ...`). Pure surface-style matching is not a sufficient success criterion. Offline only; neither generated texts nor corpus are uploaded to Buffer.
+
 ## Observed pilot results (2026-11-01)
 
 - The owner's October 26 X export contains **12,142** posts. The math-topic candidate filter selected **392** originals (370 RU, 22 non-Russian).
