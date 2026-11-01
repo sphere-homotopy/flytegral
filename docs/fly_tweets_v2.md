@@ -106,6 +106,24 @@ All outputs retain source idempotency key, chosen component IDs and `publishable
 - The owner's 392 selected math posts are available for *style calibration*, but machine-draft translations are not reliable positive examples. No corpus-weight learning has been applied here yet.
 - Sampling from the existing Fly policy is near uniform; the policy still needs a trained selector that can learn what kinds of combinations work.
 
+## Blinded A/B evaluation and preference fitting
+
+The experimentation code includes `src/fly_window/text/preference_lab.py`, a paired *reviewer feedback* tool. It does not fabricate positive results or use engagement numbers that are missing.
+
+```powershell
+py -3.12 scripts/compare_fly_decoders.py make --outbox "$env:LOCALAPPDATA\\flytegral\\fly-tweets\\state\\outbox.jsonl" --review-csv .private/fly_v2_ab_review.csv --count 30
+```
+
+The CSV has **30 blinded pairs** sampled from the same saved Fly trajectory per pair. One text is v0 (pre-written full situation), the other v1 (composition). Position A/B is deterministic but hidden. The metadata sidecar `.private/fly_v2_ab_review.metadata.jsonl` holds the provenance and generator assignments, separately from the review CSV.
+
+Set `preferred` to `A` or `B`, or to `tie` / `skip`; leave it empty if not reviewed. Don't change the other columns. Only explicit A/B choices create preference training examples:
+
+```powershell
+py -3.12 scripts/compare_fly_decoders.py train --review-csv .private/fly_v2_ab_review.csv --model-json .private/fly_v2_preference_model.json
+```
+
+A lightweight pairwise logistic learner adjusts interpretable *post-decoder* topic, scene, move, decoder, question and length weights. It is not training the 57k-neuron connectome, and it cannot by itself produce new sentences. With zero submitted labels, it reports `trained: false` and does not write a fake model. All evaluated texts and models stay offline; no publication hook is introduced.
+
 ## Observed pilot results (2026-11-01)
 
 - The owner's October 26 X export contains **12,142** posts. The math-topic candidate filter selected **392** originals (370 RU, 22 non-Russian).
