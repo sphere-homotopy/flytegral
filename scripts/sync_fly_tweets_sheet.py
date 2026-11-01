@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fly_window.publishing.sheet_transport import (
@@ -44,7 +45,9 @@ def main() -> None:
         print(json.dumps({"action": "sync", "rows": len(reconciled)}, sort_keys=True))
         return
 
-    batches = complete_generated_batches(rows)
+    # Old, unsent batches may survive an owner pause. Never replay them after
+    # their entire schedule has expired; only fresh future batches may ingest.
+    batches = complete_generated_batches(rows, now=datetime.now(UTC))
     if not batches:
         print(json.dumps({"action": "ingest", "batches": 0, "rows": len(rows)}, sort_keys=True))
         return
