@@ -43,6 +43,16 @@ py -3.12 scripts/apply_editor_translations.py --input .private/fly_tweets_owner_
 
 The pilot preserves mathematical words, jokes and authorial tone rather than word-by-word translation; it is still marked `editor_draft`, **not** `reviewed`. When Argos is available, `scripts/translate_owner_math_corpus.py` resumes on the remaining Russian posts without overwriting editor drafts. Both automatic and editor drafts require explicit review before training.
 
+## Human review queue
+
+To avoid teaching the fly broken literal translations or copying old jokes, create an editable CSV review queue from locally translated candidates:
+
+```powershell
+py -3.12 scripts/build_fly_v2_review_queue.py --input .private/fly_tweets_owner_math_en.jsonl --output .private/fly_v2_review.csv --count 100
+```
+
+The CSV retains the original, English draft, source URL, translation state, a blank `review_decision`, and reviewer notes. Editor drafts are presented before machine drafts; long and URL-dependent examples are deprioritized. **Nothing is automatically approved or used by the model.** This is an input for human style/joke and mathematical correctness review. Keep the CSV private and do not sync it into production automatically.
+
 ## Candidate accounts
 
 Configured in `configs/fly_tweets_v2_sources.json`: `@alcuintweets` and `@mouse_math`. Both are **review-only** candidates, not training data. The older X collector accepts `COOK_ACCOUNTS` but its current rows do not reliably identify replies/quote tweets, so ingest **requires explicit `is_reply: false` and `is_quote: false`** from an upgraded or independently reviewed collector. Missing evidence means reject; do not force them into the corpus. `scripts/prepare_candidate_math_corpus.py` also verifies that each status URL belongs to its claimed author, excludes RTs and non-math tweets, and writes source-attributed records to a private file.
