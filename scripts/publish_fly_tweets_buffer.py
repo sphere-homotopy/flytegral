@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import UTC, datetime
 import json
 import os
 import urllib.error
@@ -81,6 +82,7 @@ def main() -> None:
     parser.add_argument(
         "--organization-id", default=os.environ.get("BUFFER_ORGANIZATION_ID", "")
     )
+    parser.add_argument("--new-only", action="store_true", help="Only submit previously unsent generated rows.")
     args = parser.parse_args()
 
     api_key = str(args.api_key).strip()
@@ -102,6 +104,18 @@ def main() -> None:
 
     for row in rows:
         buffer_post_id = str(row.get("buffer_post_id", "") or "").strip()
+        status = str(row.get("status", "") or "").strip()
+        if args.new_only and (buffer_post_id or status != "generated"):
+            continue
+        if not buffer_post_id and status == "generated":
+            due_at = datetime.fromisoformat(str(row.get("scheduled_at", "")).replace("Z", "+00:00"))
+            if due_at.tzinfo is None or due_at.utcoffset() is None:
+                raise ValueError("generated tweet scheduled_at must include a timezone")
+            if due_at <= datetime.now(UTC):
+                row["status"] = "expired"
+                row["last_error"] = "Skipped past-due unsent tweet after publication resume"
+                _write_atomic(args.rows_json, rows)
+                continue
         if buffer_post_id:
             try:
                 status = parse_post_status_response(
