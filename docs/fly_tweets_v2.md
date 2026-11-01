@@ -33,6 +33,16 @@ py -3.12 -m venv .private/translator-venv
 
 Use `--limit 30` for a pilot; rerun to resume without replacing existing drafts. An `original_en` tweet is preserved as-is. Russian translations are `machine_draft`, **not approved training data**; review idioms, jokes, symbols and mathematical terminology before marking `reviewed`. Source attribution survives. No archive contents, originals or draft translations are committed or sent to cloud translation APIs.
 
+## Candidate accounts
+
+Configured in `configs/fly_tweets_v2_sources.json`: `@alcuintweets` and `@mouse_math`. Both are **review-only** candidates, not training data. The older X collector accepts `COOK_ACCOUNTS` but its current rows do not reliably identify replies/quote tweets, so ingest **requires explicit `is_reply: false` and `is_quote: false`** from an upgraded or independently reviewed collector. Missing evidence means reject; do not force them into the corpus. `scripts/prepare_candidate_math_corpus.py` also verifies that each status URL belongs to its claimed author, excludes RTs and non-math tweets, and writes source-attributed records to a private file.
+
+```powershell
+py -3.12 scripts/prepare_candidate_math_corpus.py --input .private/validated_external_x.jsonl --output .private/external_math_review.jsonl
+```
+
+This makes accidental training on `@mouse_math`'s non-mathematical posts or on someone else's retweets less likely. Respect source rights and retain URLs.
+
 ## Offline semantic decoder (v0)
 
 The *current* Fly token trajectories are nearly uniform random. This prototype intentionally **does not** pretend the fly understands math or has created original jokes. It is a constrained concept/voice decoder for comparing whether the audience prefers a coherent mathematical-fly contrast over a word salad.

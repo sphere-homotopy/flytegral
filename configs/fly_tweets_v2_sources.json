@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "owner": {
+    "handle": "sphere_homotopy",
+    "origin": "owned_x_archive",
+    "priority": 1,
+    "requires_translation_review": true
+  },
+  "external_candidates": [
+    {
+      "handle": "alcuintweets",
+      "origin": "x_profile",
+      "training_approved": false,
+      "purpose": "math humor, unconventional thought patterns"
+    },
+    {
+      "handle": "mouse_math",
+      "origin": "x_profile",
+      "training_approved": false,
+      "purpose": "math observations, unusual creature-persona voice"
+    }
+  ],
+  "constraints": {
+    "original_posts_only": true,
+    "exclude_replies": true,
+    "require_explicit_math_topic": true,
+    "preserve_author_and_source_url": true,
+    "exclude_reposts_and_quoted_text": true,
+    "pretraining_requires_review": true
+  }
+}
