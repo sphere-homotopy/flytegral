@@ -21,6 +21,18 @@ py -3.12 scripts/prepare_owner_math_corpus.py --archive "C:\\Users\\khoru\\Downl
 
 Archive files and `.private/` must stay outside the Git repository history. Inspect the resulting count and review outliers; keyword matching is a **candidate filter** only.
 
+## Offline translation
+
+`scripts/translate_owner_math_corpus.py` uses a local Argos RU→EN model. It downloads a model only with `--install-model`; after installation inference is local. Install the optional dependency into an isolated environment, never the production Fly venv:
+
+```powershell
+py -3.12 -m venv .private/translator-venv
+.private/translator-venv/Scripts/python.exe -m pip install argostranslate
+.private/translator-venv/Scripts/python.exe scripts/translate_owner_math_corpus.py --input .private/fly_tweets_owner_math.jsonl --output .private/fly_tweets_owner_math_en.jsonl --install-model
+```
+
+Use `--limit 30` for a pilot; rerun to resume without replacing existing drafts. An `original_en` tweet is preserved as-is. Russian translations are `machine_draft`, **not approved training data**; review idioms, jokes, symbols and mathematical terminology before marking `reviewed`. Source attribution survives. No archive contents, originals or draft translations are committed or sent to cloud translation APIs.
+
 ## Success criteria
 
 Compare the existing generator and the experimental generator on fixed seeds. Metrics: grammatical completeness, unexpected but interpretable relation between mathematical and fly concepts, human pairwise preference, exact/near duplication, and length/EOS behavior. No automatic publishing until approved.
