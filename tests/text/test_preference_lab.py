@@ -33,6 +33,23 @@ def test_blind_trials_share_real_source_and_hide_generator_names(tmp_path):
     assert read_reviews(tmp_path / "review.csv", metadata) == []
 
 
+def test_can_compare_composition_against_styled_version():
+    from functools import partial
+    from fly_window.text.compositional_engine import compose_fly_trace
+    from fly_window.text.style_profile import StyleProfile, styled_fly_trace
+    style = StyleProfile(22, 78., .55, .04)
+    trials, metadata = make_blind_trials(
+        [_row(i) for i in range(50)], count=20,
+        baseline=compose_fly_trace,
+        challenger=partial(styled_fly_trace, profile=style),
+    )
+    assert trials
+    assert all({row["a"]["decoder"], row["b"]["decoder"]} == {
+        "fly_compositional_v1", "fly_compositional_style_v2",
+    } for row in metadata)
+    assert all(row["preferred"] == "" for row in trials)
+
+
 def test_labels_required_and_explicit_preferences_are_honored(tmp_path):
     trials, meta = make_blind_trials([_row(i) for i in range(35)], count=10)
     path = tmp_path / "review.csv"

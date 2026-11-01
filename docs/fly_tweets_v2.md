@@ -124,6 +124,22 @@ py -3.12 scripts/compare_fly_decoders.py train --review-csv .private/fly_v2_ab_r
 
 A lightweight pairwise logistic learner adjusts interpretable *post-decoder* topic, scene, move, decoder, question and length weights. It is not training the 57k-neuron connectome, and it cannot by itself produce new sentences. With zero submitted labels, it reports `trained: false` and does not write a fake model. All evaluated texts and models stay offline; no publication hook is introduced.
 
+### Evaluate the owner-style v2 against compositional v1
+
+To blind-compare **v1 composition vs v2 compact owner-style composition with owner math-topic prior**, generate a second CSV:
+
+```powershell
+py -3.12 scripts/compare_fly_decoders.py make --outbox "$env:LOCALAPPDATA\\flytegral\\fly-tweets\\state\\outbox.jsonl" --owner-corpus .private/fly_tweets_owner_math_en.jsonl --topic-prior-from-owner --review-csv .private/fly_v2_styled_ab_review.csv --count 30
+```
+
+The file has two text columns (`text_a`, `text_b`) and a blank `preferred` column. Set `preferred` to A, B, tie, or skip for each comparison; labels can be collected partially. Metadata remains in the adjacent `.metadata.jsonl` file, so the rater does not see the decoder's name. Both alternatives for each row use **exactly the same original Fly token trace**. Learn the post-hoc preference model only from those marked preferences:
+
+```powershell
+py -3.12 scripts/compare_fly_decoders.py train --review-csv .private/fly_v2_styled_ab_review.csv --model-json .private/fly_v2_styled_preference_model.json
+```
+
+As of this checkpoint, 30 blinded pairs exist with **zero** human responses: no model was trained and no candidate was approved for publication. Keep the data stable while filling out the review CSV (regeneration would clear labels).
+
 ## Corpus-derived style calibration (v2)
 
 The third offline renderer, `src/fly_window/text/style_profile.py`, uses only the owner's `original_en` and `editor_draft` texts as stylistic examples. It excludes machine-draft translations, links, texts over 280 characters, and duplicate texts. **The corpus is used for simple style statistics, not as a stock of jokes to reuse.** It never inserts source sentences into generated posts.

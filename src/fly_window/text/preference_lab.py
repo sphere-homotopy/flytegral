@@ -23,7 +23,8 @@ def _identity(obj: object) -> str:
     return hashlib.sha256(json.dumps(obj, sort_keys=True, ensure_ascii=True).encode()).hexdigest()[:18]
 
 
-def make_blind_trials(rows: list[dict], *, count: int = 30) -> tuple[list[dict], list[dict]]:
+def make_blind_trials(rows: list[dict], *, count: int = 30,
+                      baseline=None, challenger=None) -> tuple[list[dict], list[dict]]:
     """Both candidates originate from the SAME actual Fly token trajectory."""
     if count < 1:
         raise ValueError("count must be positive")
@@ -33,8 +34,8 @@ def make_blind_trials(rows: list[dict], *, count: int = 30) -> tuple[list[dict],
     used_ids: set[str] = set()
     for row in reversed(rows):
         try:
-            old = decode_fly_trace(row, max_chars=240)
-            new = compose_fly_trace(row, max_chars=240)
+            old = (baseline or decode_fly_trace)(row, max_chars=240)
+            new = (challenger or compose_fly_trace)(row, max_chars=240)
         except (ValueError, KeyError, TypeError, json.JSONDecodeError):
             continue
         source = str(row.get("idempotency_key", ""))
