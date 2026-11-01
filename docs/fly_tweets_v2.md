@@ -31,7 +31,7 @@ py -3.12 -m venv .private/translator-venv
 .private/translator-venv/Scripts/python.exe scripts/translate_owner_math_corpus.py --input .private/fly_tweets_owner_math.jsonl --output .private/fly_tweets_owner_math_en.jsonl --install-model
 ```
 
-Use `--limit 30` for a pilot; rerun to resume without replacing existing drafts. An `original_en` tweet is preserved as-is. Russian translations are `machine_draft`, **not approved training data**; review idioms, jokes, symbols and mathematical terminology before marking `reviewed`. Source attribution survives. No archive contents, originals or draft translations are committed or sent to cloud translation APIs.
+If the Argos package registry returns 403, download the same RU→EN package from its official mirror `https://data.argosopentech.com/argospm/v1/translate-ru_en-1_9.argosmodel` into `.private/translate-ru_en-1_9.argosmodel`, then use `--model-file .private/translate-ru_en-1_9.argosmodel` instead of `--install-model` on the first run. Neither this model nor any tweets are committed. Use `--limit 30` for a pilot; rerun without the install option to resume without replacing existing drafts. An `original_en` tweet is preserved as-is. Russian translations are `machine_draft`, **not approved training data**; review idioms, jokes, symbols and mathematical terminology before marking `reviewed`. Source attribution survives. No archive contents, originals or draft translations are committed or sent to cloud translation APIs.
 
 ## Owner translation pilot
 

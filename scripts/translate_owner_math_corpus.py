@@ -78,11 +78,17 @@ def main() -> None:
     p.add_argument("--input", type=Path, required=True)
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--install-model", action="store_true", help="Download Argos RU-EN model explicitly")
+    p.add_argument("--model-file", type=Path, help="Install RU-EN .argosmodel from an already downloaded local file")
     p.add_argument("--limit", type=int, default=None, help="Translate up to N pending RU tweets per call")
     args = p.parse_args()
     if args.limit is not None and args.limit < 1:
         p.error("--limit must be positive")
-    if args.install_model:
+    if args.model_file is not None:
+        import argostranslate.package as package
+        if not args.model_file.is_file():
+            raise FileNotFoundError(args.model_file)
+        package.install_from_path(args.model_file)
+    elif args.install_model:
         install_ru_en_package()
 
     import argostranslate.translate as argos
