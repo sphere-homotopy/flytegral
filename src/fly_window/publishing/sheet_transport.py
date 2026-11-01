@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 import urllib.error
 import urllib.request
 from collections import OrderedDict
@@ -103,7 +104,12 @@ def _is_complete_batch(rows: Sequence[Mapping[str, object]]) -> bool:
 
 def complete_generated_batches(
     rows: Sequence[Mapping[str, object]],
+    *,
+    now: datetime | None = None,
 ) -> dict[str, list[dict[str, object]]]:
+    """Return complete unsent batches, excluding wholly expired batches when now is set."""
+    if now is not None and (now.tzinfo is None or now.utcoffset() is None):
+        raise ValueError("now must be timezone-aware")
     grouped: OrderedDict[str, list[dict[str, object]]] = OrderedDict()
     for source in rows:
         row = dict(source)
@@ -121,6 +127,15 @@ def complete_generated_batches(
         if not _is_complete_batch(batch_rows):
             continue
         ordered = sorted(batch_rows, key=lambda row: int(row["tweet_index"]))
+        if now is not None:
+            due_times = [
+                datetime.fromisoformat(str(row["scheduled_at"]).replace("Z", "+00:00"))
+                for row in ordered
+            ]
+            if any(due.tzinfo is None or due.utcoffset() is None for due in due_times):
+                raise ValueError("scheduled_at must be timezone-aware")
+            if all(due <= now for due in due_times):
+                continue
         result[batch_id] = ordered
     return result
 
