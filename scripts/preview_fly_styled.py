@@ -9,6 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from fly_window.text.compositional_engine import select_compositions
 from fly_window.text.style_profile import learn_style, select_styled
+from fly_window.text.topic_prior import learn_topic_prior
 
 
 def read_jsonl(path: Path) -> list[dict]:
@@ -33,14 +34,17 @@ def main() -> None:
     p.add_argument("--owner-corpus", type=Path, required=True)
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--count", type=int, default=30)
+    p.add_argument("--topic-prior-from-owner", action="store_true", help="Bias topics using math terms in owner originals")
     args = p.parse_args()
-    profile = learn_style(read_jsonl(args.owner_corpus))
+    owner = read_jsonl(args.owner_corpus)
+    profile = learn_style(owner)
+    topic_prior = learn_topic_prior(owner) if args.topic_prior_from_owner else None
     source = read_jsonl(args.outbox)
     v1 = select_compositions(source, count=args.count)
-    v2 = select_styled(source, profile, count=args.count)
+    v2 = select_styled(source, profile, count=args.count, topic_prior=topic_prior)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text("".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in v2), encoding="utf-8")
-    report = {"owner_profile": profile.as_dict(), "v1": summary(v1), "v2_styled": summary(v2),
+    report = {"owner_profile": profile.as_dict(), "topic_prior": topic_prior.as_dict() if topic_prior is not None else None, "v1": summary(v1), "v2_styled": summary(v2),
               "samples_from_real_fly": len(source), "human_funniness_labels": 0}
     args.output.with_suffix(".report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False))

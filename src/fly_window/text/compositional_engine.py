@@ -107,7 +107,7 @@ def _sampled_tokens(row: dict) -> list[int]:
     return raw
 
 
-def choose_parts(row: dict) -> tuple[MathConcept, FlyScene, str, str]:
+def choose_parts(row: dict, *, topic_prior=None) -> tuple[MathConcept, FlyScene, str, str]:
     tokens = _sampled_tokens(row)
     # Disjoint streams: changing an environment token does not change math choice.
     math_stream, scene_stream, move_stream = tokens[0::3], tokens[1::3], tokens[2::3]
@@ -116,7 +116,12 @@ def choose_parts(row: dict) -> tuple[MathConcept, FlyScene, str, str]:
     salient = next((word for word in words if any(word in c.triggers for c in CONCEPTS)), None)
     if salient:
         math_candidates = [c for c in CONCEPTS if salient in c.triggers]
-    concept = math_candidates[_choice(math_stream, "math", len(math_candidates))]
+    if topic_prior is None or salient is not None:
+        concept = math_candidates[_choice(math_stream, "math", len(math_candidates))]
+    else:
+        from fly_window.text.topic_prior import weighted_index
+        sample = _choice(math_stream, "topic_prior", 1000000) / 1000000.
+        concept = math_candidates[weighted_index([c.key for c in math_candidates], topic_prior, sample)]
     allowed_scenes = [scene for scene in SCENES if set(concept.axes).intersection(scene.axes)]
     scene = allowed_scenes[_choice(scene_stream, "scene", len(allowed_scenes))]
     move = MOVES[_choice(move_stream, "move", len(MOVES))]

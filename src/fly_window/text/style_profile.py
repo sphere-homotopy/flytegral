@@ -86,9 +86,9 @@ def render_short(concept: MathConcept, scene: FlyScene, move: str) -> str:
     raise ValueError(move)
 
 
-def styled_fly_trace(row: dict, profile: StyleProfile, *, max_chars: int = 240) -> dict:
+def styled_fly_trace(row: dict, profile: StyleProfile, *, max_chars: int = 240, topic_prior=None) -> dict:
     tokens = _sampled_tokens(row)
-    concept, scene, fly_move, trigger = choose_parts(row)
+    concept, scene, fly_move, trigger = choose_parts(row, topic_prior=topic_prior)
     move_stream = tokens[2::3]
     question_target = (_choice(move_stream, "question_intent", 10000) / 10000.) < profile.question_fraction
     # The fly's preferred rhetorical move is a tie-breaker, NOT overwritten by a fixed schedule.
@@ -119,19 +119,20 @@ def styled_fly_trace(row: dict, profile: StyleProfile, *, max_chars: int = 240) 
         "fly_trigger": trigger,
         "source_idempotency_key": row.get("idempotency_key", ""),
         "style_fingerprint": fingerprint,
+        "topic_prior_fingerprint": topic_prior.fingerprint if topic_prior is not None else None,
         "publishable": False,
     }
 
 
 def select_styled(rows: list[dict], profile: StyleProfile, count: int = 30,
-                  *, max_chars: int = 240) -> list[dict]:
+                  *, max_chars: int = 240, topic_prior=None) -> list[dict]:
     if count < 1:
         raise ValueError("count must be positive")
     out: list[dict] = []
     seen_sources: set[str] = set()
     for row in reversed(rows):
         try:
-            candidate = styled_fly_trace(row, profile, max_chars=max_chars)
+            candidate = styled_fly_trace(row, profile, max_chars=max_chars, topic_prior=topic_prior)
         except (TypeError, ValueError, json.JSONDecodeError):
             continue
         source = str(candidate["source_idempotency_key"])
