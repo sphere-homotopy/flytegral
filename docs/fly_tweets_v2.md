@@ -33,6 +33,16 @@ py -3.12 -m venv .private/translator-venv
 
 Use `--limit 30` for a pilot; rerun to resume without replacing existing drafts. An `original_en` tweet is preserved as-is. Russian translations are `machine_draft`, **not approved training data**; review idioms, jokes, symbols and mathematical terminology before marking `reviewed`. Source attribution survives. No archive contents, originals or draft translations are committed or sent to cloud translation APIs.
 
+## Owner translation pilot
+
+An initial **11-editor-draft** sample has been translated manually from the owner's actual Russian math posts. Drafts remain at `.private/editor_translations_pilot.jsonl`; original Russian tweets remain untouched in `.private/fly_tweets_owner_math.jsonl`. The merged, attributed corpus is at `.private/fly_tweets_owner_math_en.jsonl`. None of these files is tracked or training-approved.
+
+```powershell
+py -3.12 scripts/apply_editor_translations.py --input .private/fly_tweets_owner_math.jsonl --edits .private/editor_translations_pilot.jsonl --output .private/fly_tweets_owner_math_en.jsonl
+```
+
+The pilot preserves mathematical words, jokes and authorial tone rather than word-by-word translation; it is still marked `editor_draft`, **not** `reviewed`. When Argos is available, `scripts/translate_owner_math_corpus.py` resumes on the remaining Russian posts without overwriting editor drafts. Both automatic and editor drafts require explicit review before training.
+
 ## Candidate accounts
 
 Configured in `configs/fly_tweets_v2_sources.json`: `@alcuintweets` and `@mouse_math`. Both are **review-only** candidates, not training data. The older X collector accepts `COOK_ACCOUNTS` but its current rows do not reliably identify replies/quote tweets, so ingest **requires explicit `is_reply: false` and `is_quote: false`** from an upgraded or independently reviewed collector. Missing evidence means reject; do not force them into the corpus. `scripts/prepare_candidate_math_corpus.py` also verifies that each status URL belongs to its claimed author, excludes RTs and non-math tweets, and writes source-attributed records to a private file.

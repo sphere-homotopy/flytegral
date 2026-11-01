@@ -41,7 +41,7 @@ def translate_rows(
         row = dict(original)
         key = str(row["tweet_id"])
         saved = previous.get(key)
-        if saved and saved.get("translation_status") in ("machine_draft", "original_en", "reviewed"):
+        if saved and saved.get("translation_status") in ("machine_draft", "editor_draft", "original_en", "reviewed"):
             result.append(saved)
             continue
         if row["language"] == "en":
