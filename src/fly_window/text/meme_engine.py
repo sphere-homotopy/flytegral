@@ -120,6 +120,15 @@ def decode_fly_trace(row: dict, *, max_chars: int = 280) -> dict:
     raise ValueError("No complete semantic candidate fits char cap")
 
 
+def lexical_similarity(first: str, second: str) -> float:
+    """Jaccard of word sets catches reordered sentences with identical punchlines."""
+    a = set(TOKEN_PATTERN.findall(first.casefold()))
+    b = set(TOKEN_PATTERN.findall(second.casefold()))
+    if not a and not b:
+        return 1.0
+    return len(a & b) / len(a | b)
+
+
 def preview_candidates(rows: list[dict], *, count: int, max_chars: int = 280) -> list[dict]:
     if count <= 0:
         raise ValueError("count must be positive")
@@ -136,6 +145,8 @@ def preview_candidates(rows: list[dict], *, count: int, max_chars: int = 280) ->
             source = candidate["source_idempotency_key"]
             normalized = re.sub(r"\s+", " ", candidate["text"]).casefold()
             if normalized in seen_texts or source in seen_sources:
+                continue
+            if any(lexical_similarity(candidate["text"], selected["text"]) > 0.72 for selected in output):
                 continue
             if fresh_topic_only and topic in seen_topics:
                 continue

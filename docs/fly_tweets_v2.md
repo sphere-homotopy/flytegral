@@ -70,7 +70,7 @@ The *current* Fly token trajectories are nearly uniform random. This prototype i
 - Inputs: existing Fly outbox `token_ids`, `text`, `rng_seed`, and `idempotency_key`.
 - The first mathematically salient sampled token drives the topic; otherwise a deterministic hash of the Fly trace chooses the topic. The trace + seed chooses the voice.
 - The fact/world pairs are an explicit, inspectable, math-reviewed seed bank; no pretrained LLM and no direct reuse of other people's tweets.
-- Two-pass selection prioritizes unique topics, then unique surface texts. Every record is tagged `publishable: false`; there is **no Buffer/X integration**.
+- Two-pass selection prioritizes unique topics, then unique surface texts. A Jaccard word-set near-duplicate guard catches rearrangements of the same joke. The test outbox currently yields 15 genuinely distinct topic previews from 117 raw generated rows. Every record is tagged `publishable: false`; there is **no Buffer/X integration**.
 - Production still uses the original generator; changes to v2 cannot silently publish anything.
 
 ```powershell

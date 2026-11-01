@@ -23,6 +23,16 @@ def test_repeated_seeds_do_not_publish_duplicates():
     assert len(preview_candidates(rows, count=5)) == 1
 
 
+def test_deduplication_rejects_reordered_same_concept():
+    from fly_window.text.meme_engine import lexical_similarity
+    original = "theorem: the window is glass. i feel betrayed by topology."
+    reordered = "i feel betrayed by topology. the window is glass. theorem."
+    assert lexical_similarity(original, reordered) == 1.0
+    rows = [{"text": "open", "token_ids": [1, 2, i], "rng_seed": i,
+             "idempotency_key": str(i)} for i in range(8)]
+    assert len(preview_candidates(rows, count=8)) == 1
+
+
 def test_every_fact_is_renderable_without_truncation():
     from fly_window.text.meme_engine import render_situation, VOICES
     for card in SITUATIONS:
