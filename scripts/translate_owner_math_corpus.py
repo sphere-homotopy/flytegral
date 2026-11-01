@@ -97,8 +97,24 @@ def main() -> None:
         raise RuntimeError("Argos RU-EN model not installed; rerun with --install-model")
     raw = load_jsonl(args.input)
     prev = {str(row["tweet_id"]): row for row in load_jsonl(args.output)}
-    results = translate_rows(raw, lambda text: argos.translate(text, "ru", "en"), existing=prev, limit=args.limit)
+    # Preserve already completed/editor-drafted records and checkpoint each
+    # translated tweet. A long CPU-only run is safe to interrupt and resume.
+    results = [dict(prev.get(str(row["tweet_id"]), row)) for row in raw]
     save_jsonl_atomic(args.output, results)
+    attempts = 0
+    for index, row in enumerate(results):
+        if row["language"] != "ru":
+            continue
+        if row.get("translation_status") in ("editor_draft", "machine_draft", "reviewed"):
+            continue
+        if args.limit is not None and attempts >= args.limit:
+            break
+        attempts += 1
+        translated = translate_rows([row], lambda text: argos.translate(text, "ru", "en"), limit=1)[0]
+        results[index] = translated
+        save_jsonl_atomic(args.output, results)
+        if attempts % 10 == 0:
+            print(json.dumps({"progress": attempts, "last_tweet_id": row["tweet_id"]}), flush=True)
     totals: dict[str, int] = {}
     for row in results:
         status = str(row["translation_status"])
