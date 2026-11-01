@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 
 from fly_window.publishing.sheet_transport import (
@@ -37,6 +39,16 @@ def test_complete_generated_batches_accepts_fly_selected_size() -> None:
 
     assert list(batches) == ["b1"]
     assert [row["tweet_index"] for row in batches["b1"]] == [0, 1, 2]
+
+
+def test_complete_generated_batches_excludes_expired_batches_at_resume() -> None:
+    old = [_row("old", index, batch_size=2) for index in range(2)]
+    new = [_row("new", index, batch_size=2) for index in range(2)]
+    for row in new:
+        row["scheduled_at"] = "2026-11-04T14:00:00Z"
+
+    result = complete_generated_batches(old + new, now=datetime(2026, 11, 1, tzinfo=UTC))
+    assert list(result) == ["new"]
 
 
 def test_complete_generated_batches_ignores_rows_already_owned_by_buffer() -> None:
