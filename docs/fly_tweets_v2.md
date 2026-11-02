@@ -185,6 +185,18 @@ On the historical 117-token-trace input, this variant yields 30 unique captions 
 - `@alcuintweets` and `@mouse_math` are registered as candidate sources. No complete third-party dataset has been ingested; brief retweet excerpts in the owner's archive do not constitute usable full originals.
 - This version is a **seed-bank decoder**, not a newly trained joke-producing model. We must evaluate originality, style, mathematical correctness and whether people actually find the results funny before attempting any production promotion.
 
+## Native X delivery fallback (2026-11-02)
+
+The production Buffer account returned HTTP **429** with `RATE_LIMIT_EXCEEDED`, `window: "30d"`. Buffer's 30-day quota is shared across API keys, so rotating credentials or aggressive retries will not fix it. The already-authorized X profile on the Windows runner is `@fly_topology` (verified by the collector's read-only login check). We are implementing an explicitly separate, safe X-browser fallback; this is not an API-quota workaround in the sense of creating new credentials.
+
+`scripts/queue_fly_v2_live.py` takes existing generated Fly token trajectories, owner-original corpus, and a durable native-posting queue. It only creates new posts from **future**, not yet Buffer-scheduled, `generated` rows. It preserves actual Fly-selected publication times and never alters a previously queued/posting/published row. Human-authorized one-time smoke posts require an explicit `--smoke-source`; otherwise history cannot be reposted. The unique X queue ID records whether a post was scheduled or a smoke test. State is persisted atomically.
+
+```powershell
+py -3.12 scripts/queue_fly_v2_live.py --rows-json "$env:LOCALAPPDATA\\flytegral\\fly-tweets\\state\\rows.json" --owner-corpus .private/fly_tweets_owner_math_en.jsonl --queue-json "$env:LOCALAPPDATA\\flytegral\\fly-tweets\\state\\v2-native-x-queue.json"
+```
+
+The composer is still experimental. Queueing does not itself publish and does not bypass the need for a trustworthy X session, strict account checks, idempotent delivery and actual tweet-link verification. Do not claim a tweet is published unless the X UI returns and independently verifies its canonical permalink.
+
 ## Success criteria
 
 Compare the existing generator and the experimental generator on fixed seeds. Metrics: grammatical completeness, unexpected but interpretable relation between mathematical and fly concepts, human pairwise preference, exact/near duplication, and length/EOS behavior. No automatic publishing until approved.
