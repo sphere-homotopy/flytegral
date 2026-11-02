@@ -1,0 +1,5 @@
+Native X v2 now owns Fly Tweets publication for @fly_topology as of 2026-11-02.
+The Buffer API is blocked by its rolling 30-day quota. Do not ingest new
+legacy v1 word-salad posts into Google Sheets for Buffer publishing.
+The existing fly connectome/cadence generation and metrics may continue.
+Remove this marker only as a deliberate, separately verified publishing cutover.
