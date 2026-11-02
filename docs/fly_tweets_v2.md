@@ -195,6 +195,21 @@ The production Buffer account returned HTTP **429** with `RATE_LIMIT_EXCEEDED`, 
 py -3.12 scripts/queue_fly_v2_live.py --rows-json "$env:LOCALAPPDATA\\flytegral\\fly-tweets\\state\\rows.json" --owner-corpus .private/fly_tweets_owner_math_en.jsonl --queue-json "$env:LOCALAPPDATA\\flytegral\\fly-tweets\\state\\v2-native-x-queue.json"
 ```
 
+### Native X UI sender and idempotency
+
+`collector/x-native-publish.js` uses the already authenticated X Playwright Chromium profile and **always verifies** the account's sidebar profile link matches `--expected-handle` before typing. Live submission requires `--allow-live` (otherwise dry-run), a durable queue record, and the due time actually passing.
+
+Before submission, the sender searches the authenticated account's own recent posts for an identical text and canonical `/status/<id>` permalink. It then persists a `publishing` claim **before** clicking the Post button. After clicking, it verifies the text and canonical permalink independently via the author's timeline and only then marks `published`. If the result is ambiguous after clicking, the record becomes `uncertain` and **will not automatically retry**; the next run attempts read-only reconciliation. Single-job lock, minimum 20-minute gap, one post per invocation, six-hour expiry window for overdue cadence posts, and no automatic publication of old outbox rows are enforced. No Buffer API request is made. Profile access may require reauthentication or a UI selector update; errors are logged, never silently treated as sent.
+
+```powershell
+cd collector
+npm install --omit=dev
+node x-native-publish.js --queue-json "$env:LOCALAPPDATA\\flytegral\\fly-tweets\\state\\v2-native-x-queue.json" --profile-dir C:\\tools\\x-stats\\x-browser-profile --expected-handle fly_topology --dry-run
+# For the explicit user-approved live rollout, replace --dry-run with --allow-live.
+```
+
+The fallback is a **browser-operated posting method**, not the Buffer API. Running a browser against X is more brittle than a supported API, so continue to verify real permalink success and session health. The queue JSON contains public posts but should remain out of Git history.
+
 The composer is still experimental. Queueing does not itself publish and does not bypass the need for a trustworthy X session, strict account checks, idempotent delivery and actual tweet-link verification. Do not claim a tweet is published unless the X UI returns and independently verifies its canonical permalink.
 
 ## Success criteria
