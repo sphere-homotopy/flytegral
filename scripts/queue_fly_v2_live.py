@@ -9,6 +9,9 @@ import argparse
 from datetime import UTC, datetime, timedelta
 import json
 from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from fly_window.text.style_profile import learn_style, styled_fly_trace
 from fly_window.text.topic_prior import learn_topic_prior
