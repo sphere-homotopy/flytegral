@@ -1,6 +1,6 @@
 # Fly Tweets v2: semantic generation experiment
 
-Status: **offline experiment / no production rollout**.
+Status: **live native-X pilot since 2026-11-02**; experimental compositional decoder is enabled only for explicitly queued, fly-timed posts. Buffer API quota is exhausted (30-day window). Historical sections below describe earlier offline milestones.
 
 ## Goal
 
@@ -219,6 +219,20 @@ The fallback is a **browser-operated posting method**, not the Buffer API. Runni
 **Live smoke proof (2026-11-02):** the browser posted "The swatter found the exact place I was sitting. Is this measure zero?" and independently verified `https://x.com/fly_topology/status/2117130124948914482`. The smoke row was durably reconciled. Three more v2 drafts remain awaiting Fly-selected 2026-11-03 times, subject to machine availability and successful UI verification. No additional smoke is scheduled.
 
 The composer is still experimental. Queueing does not itself publish and does not bypass the need for a trustworthy X session, strict account checks, idempotent delivery and actual tweet-link verification. Do not claim a tweet is published unless the X UI returns and independently verifies its canonical permalink.
+
+### Windows scheduled delivery
+
+The local Windows scheduled task is `FlyTweets-V2-Native-X`. It runs under `GEORGII\\khoru` with an interactive logon, repeating every **15 minutes**, executes `scripts/run_fly_v2_native.ps1 -AllowLive`, and never publishes before a Fly-selected due time. Installation is idempotent:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/install_fly_v2_task.ps1
+Get-ScheduledTaskInfo -TaskName FlyTweets-V2-Native-X
+Get-Content "$env:LOCALAPPDATA\\flytegral\\fly-tweets\\state\\v2-native-x-run.log" -Tail 15
+```
+
+The schedule requires the user's PC to be running **with that Windows account logged in** and the saved `C:\\tools\\x-stats\\x-browser-profile` still logged into `@fly_topology`. It is not a cloud queue. If the PC sleeps, future delivery can be delayed; missed cadence slots older than six hours are skipped rather than posted all at once on resume. Browser profile contention with the older X metrics collector causes safe retry, not a second click. The task's 364-day repetition must be renewed before expiry if still needed.
+
+**Important:** the older `main` GitHub Actions orchestrator still contains a direct Buffer fallback on the original feature branch. It must be disabled before the Buffer quota recovers, otherwise old V1 generated text might be scheduled in addition to the native X queue. Do not treat this dual-mode state as the final rollout.
 
 ## Success criteria
 
