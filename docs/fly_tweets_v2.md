@@ -210,6 +210,14 @@ node x-native-publish.js --queue-json "$env:LOCALAPPDATA\\flytegral\\fly-tweets\
 
 The fallback is a **browser-operated posting method**, not the Buffer API. Running a browser against X is more brittle than a supported API, so continue to verify real permalink success and session health. The queue JSON contains public posts but should remain out of Git history.
 
+### Delivery operations and real smoke verification
+
+`scripts/reconcile_native_x_rows.py` copies only **verified** native publications into the durable `rows.json` runtime. It preserves the Fly's original token IDs and text under `fly_original_text` for audit, marks the rendered text `published` and saves the verified X permalink. A one-time historical smoke is inserted as a separate uniquely keyed v2 row instead of rewriting past V1 rows. This allows the existing metrics collector to observe engagement on the v2 tweets. The reconciler is idempotent and never overrides a Buffer-accepted post.
+
+`scripts/run_fly_v2_native.ps1 -AllowLive` is the single-run orchestration entrypoint: reconcile already-published native posts → enqueue only future Fly-selected slots → submit at most one **due** post through authorized X UI → reconcile published statuses. Without `-AllowLive` it uses a dry run. It requires the persistent account's Chromium profile and a working Playwright install under `collector/node_modules`. Because Playwright needs the existing local Windows profile, a native scheduled task must run under the same Windows account.
+
+**Live smoke proof (2026-11-02):** the browser posted "The swatter found the exact place I was sitting. Is this measure zero?" and independently verified `https://x.com/fly_topology/status/2117130124948914482`. The smoke row was durably reconciled. Three more v2 drafts remain awaiting Fly-selected 2026-11-03 times, subject to machine availability and successful UI verification. No additional smoke is scheduled.
+
 The composer is still experimental. Queueing does not itself publish and does not bypass the need for a trustworthy X session, strict account checks, idempotent delivery and actual tweet-link verification. Do not claim a tweet is published unless the X UI returns and independently verifies its canonical permalink.
 
 ## Success criteria
