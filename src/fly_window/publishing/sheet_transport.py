@@ -43,6 +43,26 @@ def reconcile_sheet_rows(
         target = dict(row)
         previous = local_by_key.pop(key, None)
         if previous is not None:
+            # The native X v2 sender is independently permalink-verified.
+            # Old Google Sheet states may still say "paused"/"generated" while
+            # the Windows browser has already published the v2 rendering.
+            # Never let a stale Sheet row erase the verified tweet or its text.
+            import re
+            native_url = str(previous.get("tweet_url", "") or "")
+            native_published = (
+                previous.get("decoder") == "fly_compositional_style_v2"
+                and previous.get("status") == "published"
+                and re.fullmatch(r"https://x\.com/fly_topology/status/[0-9]+", native_url) is not None
+                and not str(target.get("buffer_post_id", "") or "").strip()
+            )
+            if native_published:
+                for field in (
+                    "status", "tweet_url", "text", "published_at",
+                    "decoder", "fly_original_text", "last_error",
+                ):
+                    if field in previous:
+                        target[field] = previous[field]
+
             local_metrics_at = str(previous.get("metrics_collected_at", "") or "").strip()
             sheet_metrics_at = str(target.get("metrics_collected_at", "") or "").strip()
 

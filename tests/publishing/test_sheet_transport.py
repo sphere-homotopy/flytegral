@@ -105,6 +105,31 @@ def test_sheet_sync_keeps_learning_fields_and_authoritative_published_status():
     assert result[0]["training_consumed_at"] == old["training_consumed_at"]
 
 
+def test_native_x_permalink_survives_stale_sheet_sync_without_overriding_buffer():
+    local = _row("next", 0, batch_size=1, status="published")
+    local.update({
+        "text": "Is this topology?", "fly_original_text": "raw neural words",
+        "decoder": "fly_compositional_style_v2",
+        "tweet_url": "https://x.com/fly_topology/status/123456",
+        "published_at": "2026-11-02T05:42:00Z", "last_error": "",
+    })
+    stale = _row("next", 0, batch_size=1, status="paused")
+    stale["last_error"] = "Buffer 429 old error"
+    merged = reconcile_sheet_rows([local], [stale])[0]
+    for key in ("status", "text", "tweet_url", "published_at",
+                "decoder", "fly_original_text", "last_error"):
+        assert merged[key] == local[key]
+
+    buffered = _row("next", 0, batch_size=1, status="scheduled")
+    buffered["buffer_post_id"] = "buffer-1"
+    result = reconcile_sheet_rows([local], [buffered])[0]
+    assert result["status"] == "scheduled"
+    assert result["buffer_post_id"] == "buffer-1"
+
+    unverified = dict(local, tweet_url="https://evil.tld/fly_topology/status/123")
+    assert reconcile_sheet_rows([unverified], [stale])[0]["status"] == "paused"
+
+
 def test_sheet_sync_keeps_missing_pending_rows():
     published = _row("first", 0, batch_size=1, status="published")
     pending = _row("second", 0, batch_size=1)
