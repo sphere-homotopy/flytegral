@@ -14,6 +14,15 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github/workflows/fly-tweets-orchestrator.yml"
 HANDOFF = "Prepare native queue through hidden Windows task"
+LOCKED_STEPS = (
+    "Sync previous generated outbox into durable rows",
+    "Collect X stats headlessly",
+    "Merge fresh metrics when available",
+    "Settle mature observed engagement into durable rewards",
+    "Run cadence-owned daily cycle",
+    "Sync newly generated outbox into durable rows",
+    "Train Fly for future cycles (nonblocking)",
+)
 
 
 def step_script(name: str) -> str:
@@ -33,6 +42,17 @@ def step_script(name: str) -> str:
             break
         code.append(line[10:] if line else "")
     return "\n".join(code)
+
+
+def transaction_body(name: str) -> str:
+    script = step_script(name)
+    if "with_fly_state_lock.ps1" not in script:
+        return script
+    lines = script.splitlines()
+    start = next(index + 1 for index, line in enumerate(lines) if "with_fly_state_lock.ps1 -Body {" in line)
+    if lines[-1] != "}":
+        raise AssertionError(f"lock must enclose full workflow transaction: {name}")
+    return "\n".join(line[2:] if line.startswith("  ") else line for line in lines[start:-1])
 
 
 class NativeOrchestratorContract(unittest.TestCase):
@@ -67,6 +87,29 @@ class NativeOrchestratorContract(unittest.TestCase):
     def test_marker_namespace_remains_consistent_and_documented(self) -> None:
         self.assertEqual(self.workflow.count("feature/fly-tweets-v1"), 3)
         self.assertIn("marker namespace", self.workflow)
+
+    def test_all_rows_transactions_and_shared_profile_are_locked(self) -> None:
+        for name in LOCKED_STEPS:
+            with self.subTest(step=name):
+                script = step_script(name)
+                expected_path = "../scripts" if name == "Collect X stats headlessly" else "scripts"
+                self.assertTrue(
+                    re.fullmatch(r"\$ErrorActionPreference = 'Stop'\n& " + re.escape(expected_path) + r"/with_fly_state_lock\.ps1 -Body \{\n(?:  [^\n]*\n|\n)*\}", script.strip()),
+                    f"full transaction must execute under shared state lock: {name}",
+                )
+
+    def test_task_handoff_does_not_hold_cross_process_state_lock(self) -> None:
+        self.assertNotIn("with_fly_state_lock.ps1", step_script(HANDOFF))
+
+    def test_native_failures_are_checked_inside_each_transaction(self) -> None:
+        for name in LOCKED_STEPS:
+            with self.subTest(step=name):
+                body = transaction_body(name)
+                if name == "Run cadence-owned daily cycle":
+                    self.assertIn("$cycleExit = $LASTEXITCODE", body)
+                    self.assertIn("if ($cycleExit -ne 0)", body)
+                else:
+                    self.assertIn("if ($LASTEXITCODE -ne 0)", body)
 
 
 @unittest.skipUnless(shutil.which("powershell"), "requires Windows PowerShell")
@@ -131,7 +174,7 @@ class IndependentTrainingEligibility(unittest.TestCase):
         # This has to exercise production PowerShell 5.1: PowerShell 7 silently
         # flattens ConvertFrom-Json in the old expression and hides this bug.
         powershell = Path(os.environ["WINDIR"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
-        gate = step_script("Train Fly for future cycles (nonblocking)").split("if ($pending.Count -eq 0)", 1)[0]
+        gate = transaction_body("Train Fly for future cycles (nonblocking)").split("if ($pending.Count -eq 0)", 1)[0]
         rows = [
             {"training_consumed_at": "", "reward": 0},
             {"training_consumed_at": "", "cadence_reward": 0, "cadence_context": "[1,2]"},

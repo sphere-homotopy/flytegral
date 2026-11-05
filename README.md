@@ -18,18 +18,16 @@ The publication pipeline is deliberately separated from the author:
 ```text
 MaleCNS policy
     ↓
-Google Sheets durable backlog
+Durable local outbox + rows.json
     ↓
-Apps Script
+Hidden Windows native-X task
     ↓
-Buffer (max 8 scheduled posts)
-    ↓
-X / Twitter
+Verified X / Twitter permalink
 ```
 
-Google Sheets is the source of truth. Buffer is only a short queue. Apps Script never rewrites text or changes fly-selected publication times.
+The durable local state is the source of truth. A hidden Windows task checks the native delivery queue every 15 minutes and verifies the published text on X before recording success. The legacy Sheet/Buffer path is excluded from the production orchestrator.
 
-If the fly schedules more posts than Buffer can hold and a waiting post expires before a slot becomes free, that post is skipped and the cadence policy receives a negative training signal. Transport failures are retried separately and do not punish the fly.
+The sender retains the fly-selected publication times, prevents duplicate sends, and records delivery uncertainty for reconciliation. Posts more than six hours late are marked missed rather than published unexpectedly.
 
 ## Learning loop
 
@@ -64,11 +62,11 @@ Fly Tweets is currently running as an experimental autonomous pipeline.
 
 The active implementation lives on:
 
-[`feature/fly-tweets-v1`](https://github.com/sphere-homotopy/flytegral/tree/feature/fly-tweets-v1)
+[`feature/fly-tweets-meme-v2`](https://github.com/sphere-homotopy/flytegral/tree/feature/fly-tweets-meme-v2)
 
 The detailed design is here:
 
-[Fly Tweets v1 design](https://github.com/sphere-homotopy/flytegral/blob/feature/fly-tweets-v1/docs/superpowers/specs/2026-09-17-fly-tweets-design.md)
+[Fly Tweets v1 design](https://github.com/sphere-homotopy/flytegral/blob/feature/fly-tweets-meme-v2/docs/superpowers/specs/2026-09-17-fly-tweets-design.md)
 
 ## Stack
 
