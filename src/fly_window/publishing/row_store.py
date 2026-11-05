@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, MutableSequence, Sequence
+import re
 
 # These fields belong to the original generation/cadence decision. Transport,
 # delivery, metrics and training fields are intentionally NOT part of identity.
@@ -39,8 +40,24 @@ def _check_generation_identity(
     A missing field in an older/partial record is not evidence of a conflict;
     whenever the field exists in both records its value must be identical.
     """
+    # Native v2 reconciliation stores the published rendering in text, while
+    # fly_original_text preserves the immutable neural generation snapshot.
+    # Only independently verified native publications use that source text.
+    native_rendering = (
+        durable.get("decoder") == "fly_compositional_style_v2"
+        and durable.get("status") == "published"
+        and not str(durable.get("buffer_post_id", "") or "").strip()
+        and isinstance(durable.get("fly_original_text"), str)
+        and re.fullmatch(
+            r"https://x\.com/fly_topology/status/[0-9]+",
+            str(durable.get("tweet_url", "") or ""),
+        ) is not None
+    )
     for field in _GENERATION_FIELDS:
-        if field in durable and field in incoming and durable[field] != incoming[field]:
+        if field not in durable or field not in incoming:
+            continue
+        durable_value = durable["fly_original_text"] if field == "text" and native_rendering else durable[field]
+        if durable_value != incoming[field]:
             raise ValueError(
                 f"conflicting durable row for idempotency key: {key} "
                 f"(generation field: {field})"
