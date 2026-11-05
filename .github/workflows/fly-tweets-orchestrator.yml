@@ -32,6 +32,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Keep the durable marker namespace independent of the runtime source branch.
           api="repos/$GITHUB_REPOSITORY/contents/.github/fly-tweets-last-success.json?ref=feature/fly-tweets-v1"
           if ! payload="$(gh api "$api" 2>/dev/null)"; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
@@ -71,7 +72,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: feature/fly-tweets-v1
+          ref: feature/fly-tweets-meme-v2
 
       - name: Prepare persistent runtime
         run: |
@@ -196,47 +197,12 @@ jobs:
           "FLYTWEETS_RUNTIME_STATE=$runtimeState" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "FLYTWEETS_CYCLE_RESULT=$result" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Require Google Sheet transport configuration
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $transport = Join-Path $env:FLYTEGRAL_RUNTIME 'sheet-transport.json'
-          if (-not (Test-Path $transport)) {
-            throw "Fly Tweets Sheet transport config missing: $transport"
-          }
-          $config = Get-Content -Raw $transport | ConvertFrom-Json
-          if ([string]::IsNullOrWhiteSpace([string]$config.endpoint) -or
-              -not ([string]$config.endpoint).StartsWith('https://script.google.com/')) {
-            throw 'Fly Tweets Sheet transport endpoint is missing or invalid.'
-          }
-          "FLYTWEETS_SHEET_TRANSPORT_CONFIG=$transport" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Output 'SHEET_TRANSPORT_CONFIGURED=true'
-
       - name: Sync previous generated outbox into durable rows
         run: |
           $ErrorActionPreference = 'Stop'
           & $env:FLYTWEETS_PYTHON scripts/sync_fly_tweet_outbox.py `
             --rows-json $env:FLYTWEETS_ROWS `
             --outbox-jsonl $env:FLYTWEETS_OUTBOX
-
-      - name: Flush pending local batches to Google Sheet
-        id: flush_previous
-        continue-on-error: true
-        run: |
-          $ErrorActionPreference = 'Stop'
-          & $env:FLYTWEETS_PYTHON scripts/sync_fly_tweets_sheet.py `
-            --action ingest `
-            --rows-json $env:FLYTWEETS_ROWS `
-            --transport-config $env:FLYTWEETS_SHEET_TRANSPORT_CONFIG
-
-      - name: Sync Google Sheet state before stats
-        id: sync_sheet_state
-        continue-on-error: true
-        run: |
-          $ErrorActionPreference = 'Stop'
-          & $env:FLYTWEETS_PYTHON scripts/sync_fly_tweets_sheet.py `
-            --action sync `
-            --rows-json $env:FLYTWEETS_ROWS `
-            --transport-config $env:FLYTWEETS_SHEET_TRANSPORT_CONFIG
 
       - name: Prepare metrics targets
         run: |
@@ -328,7 +294,7 @@ jobs:
           $seed = [int]((Get-Date).ToUniversalTime().ToString('yyyyMMdd'))
 
           # A completed Python cycle persists its outbox and runtime-state before
-          # Google Sheet sync or the GitHub success marker. If a later step fails,
+          # native queue preparation or the GitHub success marker. If a later step fails,
           # retry must flush the outbox, NEVER generate another batch with the same
           # daily idempotency keys. Compare both state and saved cycle provenance.
           if ((Test-Path $env:FLYTWEETS_RUNTIME_STATE) -and
@@ -399,34 +365,36 @@ jobs:
             --rows-json $env:FLYTWEETS_ROWS `
             --outbox-jsonl $env:FLYTWEETS_OUTBOX
 
-      - name: Append newly generated batch to Google Sheet
-        id: append_new_sheet
-        continue-on-error: true
+      - name: Prepare native queue through hidden Windows task
         run: |
           $ErrorActionPreference = 'Stop'
-          & $env:FLYTWEETS_PYTHON scripts/sync_fly_tweets_sheet.py `
-            --action ingest `
-            --rows-json $env:FLYTWEETS_ROWS `
-            --transport-config $env:FLYTWEETS_SHEET_TRANSPORT_CONFIG
-          if ($LASTEXITCODE -ne 0) { throw 'Sheet ingest failed; switching to the direct Buffer fallback.' }
-
-      - name: Publish new batch directly via Buffer if Sheet transport failed
-        if: steps.append_new_sheet.outcome == 'failure'
-        env:
-          BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
-          BUFFER_CHANNEL_ID: ${{ secrets.BUFFER_CHANNEL_ID }}
-          BUFFER_ORGANIZATION_ID: ${{ secrets.BUFFER_ORGANIZATION_ID }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          if ([string]::IsNullOrWhiteSpace($env:BUFFER_API_KEY) -or
-              [string]::IsNullOrWhiteSpace($env:BUFFER_CHANNEL_ID) -or
-              [string]::IsNullOrWhiteSpace($env:BUFFER_ORGANIZATION_ID)) {
-            throw 'Buffer fallback credentials are not configured.'
+          # The installed task owns the private corpus, hidden browser, queue and
+          # permalink reconciliation. Keep all delivery through that one owner.
+          $taskName = 'FlyTweets-V2-Native-X'
+          $deadline = [DateTime]::UtcNow.AddMinutes(5)
+          while ((Get-ScheduledTask -TaskName $taskName).State -eq 'Running') {
+            if ([DateTime]::UtcNow -ge $deadline) {
+              throw 'Timed out waiting for the active native X task.'
+            }
+            Start-Sleep -Seconds 2
           }
-          & $env:FLYTWEETS_PYTHON scripts/publish_fly_tweets_buffer.py `
-            --rows-json $env:FLYTWEETS_ROWS `
-            --new-only
-          if ($LASTEXITCODE -ne 0) { throw 'Direct Buffer fallback failed.' }
+          $previousRun = (Get-ScheduledTaskInfo -TaskName $taskName).LastRunTime
+          Start-ScheduledTask -TaskName $taskName
+          while ($true) {
+            $task = Get-ScheduledTask -TaskName $taskName
+            $info = Get-ScheduledTaskInfo -TaskName $taskName
+            if ($info.LastRunTime -gt $previousRun -and $task.State -ne 'Running') {
+              if ($info.LastTaskResult -ne 0) {
+                throw "Native X queue preparation/delivery failed: $($info.LastTaskResult)."
+              }
+              Write-Output "FLYTWEETS_NATIVE_TASK_SUCCESS=true last_run=$($info.LastRunTime.ToString('o'))"
+              break
+            }
+            if ([DateTime]::UtcNow -ge $deadline) {
+              throw 'Timed out waiting for a fresh successful native X task run.'
+            }
+            Start-Sleep -Seconds 2
+          }
 
       - name: Build non-sensitive health heartbeat
         run: |
@@ -487,6 +455,7 @@ jobs:
           $bytes = [System.Text.UTF8Encoding]::new($false).GetBytes($json + "`n")
           $content = [Convert]::ToBase64String($bytes)
           $api = "repos/$env:GITHUB_REPOSITORY/contents/.github/fly-tweets-last-success.json"
+          # Deliberately retain the marker namespace used by the hosted watchdog.
           $current = gh api "${api}?ref=feature/fly-tweets-v1" | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0) { throw 'Could not read Fly Tweets success marker.' }
           # Use gh's JSON field serialization rather than piping JSON via Windows
@@ -506,15 +475,21 @@ jobs:
           # Publications and the durable GitHub success marker are committed
           # BEFORE this independent training process. Even a native PyTorch crash
           # cannot invalidate today's delivery or trigger duplicate generation.
-          $rows = @(Get-Content -Raw $env:FLYTWEETS_ROWS | ConvertFrom-Json)
-          $pending = @($rows | Where-Object {
-            [string]::IsNullOrWhiteSpace([string]$_.training_consumed_at) -and
-            (
-              -not [string]::IsNullOrWhiteSpace([string]$_.reward) -or
-              (-not [string]::IsNullOrWhiteSpace([string]$_.cadence_reward) -and
-               -not [string]::IsNullOrWhiteSpace([string]$_.cadence_context))
-            )
-          })
+          # PowerShell 5.1 keeps ConvertFrom-Json arrays nested inside @(...).
+          # Explicit foreach must inspect individual rows, including zero rewards.
+          $rows = ConvertFrom-Json -InputObject (Get-Content -Raw $env:FLYTWEETS_ROWS)
+          $pending = @(
+            foreach ($row in $rows) {
+              if ([string]::IsNullOrWhiteSpace([string]$row.training_consumed_at) -and
+                  (
+                    -not [string]::IsNullOrWhiteSpace([string]$row.reward) -or
+                    (-not [string]::IsNullOrWhiteSpace([string]$row.cadence_reward) -and
+                     -not [string]::IsNullOrWhiteSpace([string]$row.cadence_context))
+                  )) {
+                $row
+              }
+            }
+          )
           if ($pending.Count -eq 0) {
             Write-Output 'FLYTWEETS_TRAINING_SKIPPED_NO_NEW_REWARDS=true'
             exit 0
