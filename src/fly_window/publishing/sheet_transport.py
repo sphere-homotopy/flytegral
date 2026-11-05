@@ -8,6 +8,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from fly_window.publishing.atomic import replace_with_retry
 
 
 _OBSERVED_FIELDS = (
@@ -247,4 +248,4 @@ def write_rows_atomic(path: Path, rows: Sequence[Mapping[str, object]]) -> None:
         + "\n",
         encoding="utf-8",
     )
-    temporary.replace(path)
+    replace_with_retry(temporary, path)

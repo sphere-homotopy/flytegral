@@ -8,6 +8,11 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from fly_window.publishing.atomic import replace_with_retry
 
 
 def reconcile_native_posts(rows: list[dict], queue: list[dict]) -> tuple[list[dict], int]:
@@ -67,7 +72,7 @@ def reconcile_native_posts(rows: list[dict], queue: list[dict]) -> tuple[list[di
 def save_atomic(path: Path, value: list[dict]) -> None:
     tmp = path.with_suffix(path.suffix + ".native-tmp")
     tmp.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    tmp.replace(path)
+    replace_with_retry(tmp, path)
 
 
 def main() -> None:

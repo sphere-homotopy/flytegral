@@ -13,6 +13,7 @@ from typing import Any
 import torch
 
 from fly_window.neural.graph import load_connectome_graph, to_sparse_recurrent
+from fly_window.publishing.atomic import replace_with_retry
 from fly_window.publishing.cadence import FlyCadencePolicy
 from fly_window.publishing.cadence_training import CadenceTrainingConfig
 from fly_window.publishing.daily_cycle import run_scheduled_daily_cycle
@@ -75,7 +76,7 @@ def _write_json(path: Path, payload: object) -> None:
         json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    temporary.replace(path)
+    replace_with_retry(temporary, path)
 
 
 def _write_rows(path: Path, rows: list[dict[str, object]]) -> None:
@@ -385,7 +386,7 @@ def main() -> None:
 
         checkpoint_tmp = checkpoint_path.with_suffix(".pt.tmp")
         torch.save(payload, checkpoint_tmp)
-        checkpoint_tmp.replace(checkpoint_path)
+        replace_with_retry(checkpoint_tmp, checkpoint_path)
         _write_json(manifest_path, dict(manifest))
 
     _stage("starting_scheduled_cycle")

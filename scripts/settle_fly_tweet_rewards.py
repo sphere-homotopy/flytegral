@@ -6,6 +6,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+from fly_window.publishing.atomic import replace_with_retry
 from fly_window.publishing.sheet_transport import load_rows, write_rows_atomic
 from fly_window.text.reward import RewardConfig, apply_settled_rewards
 
@@ -36,7 +37,7 @@ def advance_observation_clock(path: Path, rows: list[dict[str, object]]) -> bool
     state["last_stats_at"] = latest.isoformat()
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    temporary.replace(path)
+    replace_with_retry(temporary, path)
     return True
 
 

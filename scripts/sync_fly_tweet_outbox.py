@@ -4,6 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
+from fly_window.publishing.atomic import replace_with_retry
 from fly_window.publishing.row_store import merge_outbox_rows
 
 
@@ -39,7 +40,7 @@ def _write_atomic(path: Path, rows: list[dict[str, object]]) -> None:
         json.dumps(rows, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    temporary.replace(path)
+    replace_with_retry(temporary, path)
 
 
 def main() -> None:

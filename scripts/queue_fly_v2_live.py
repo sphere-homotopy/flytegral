@@ -13,6 +13,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from fly_window.publishing.atomic import replace_with_retry
 from fly_window.text.style_profile import learn_style, styled_fly_trace
 from fly_window.text.topic_prior import learn_topic_prior
 from fly_window.text.meme_engine import lexical_similarity
@@ -117,7 +118,7 @@ def save_atomic(path: Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     intermediate = path.with_suffix(path.suffix + ".tmp")
     intermediate.write_text(json.dumps(rows, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    intermediate.replace(path)
+    replace_with_retry(intermediate, path)
 
 
 def main() -> None:
