@@ -15,4 +15,3 @@ Write-Output "STATE=$($task.State)"
 Write-Output "NEXT=$($info.NextRunTime.ToString('o'))"
 Write-Output "USER=$user"
 Write-Output 'AUTOMATION=WINDOWS_INTERACTIVE_SESSION'
-
