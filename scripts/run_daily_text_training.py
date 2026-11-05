@@ -10,6 +10,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
 import torch
 
 from fly_window.neural.graph import load_connectome_graph, to_sparse_recurrent
