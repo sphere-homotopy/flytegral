@@ -547,6 +547,43 @@ jobs:
             Get-Content $trainResultPath
           }
 
+      - name: Refresh health heartbeat after independent training
+        id: refresh_health
+        if: always() && env.FLYTWEETS_HEARTBEAT != '' && (steps.train_only.outcome == 'success' || steps.train_only.outcome == 'failure')
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Delivery and its initial heartbeat/marker are already committed.
+          # Refresh the snapshot after nonblocking training so the watchdog sees
+          # the actual durable result without delaying that initial commitment.
+          $state = Get-Content -Raw $env:FLYTWEETS_RUNTIME_STATE | ConvertFrom-Json
+          $heartbeat = Get-Content -Raw $env:FLYTWEETS_HEARTBEAT | ConvertFrom-Json
+          $heartbeat.generated_at = [DateTimeOffset]::UtcNow.ToString('o')
+          $heartbeat.last_training_at = $state.last_training_at
+          if (-not [string]::IsNullOrWhiteSpace([string]$state.last_training_at)) {
+            $heartbeat.training_reference_at = $state.last_training_at
+            $referencePath = Join-Path $env:FLYTWEETS_STATE_DIR 'training-reference-at.txt'
+            [System.IO.File]::WriteAllText($referencePath, [string]$state.last_training_at, [System.Text.UTF8Encoding]::new($false))
+          }
+          $heartbeat.queue_horizon_at = $state.queue_horizon_at
+          $heartbeat.last_stats_at = $state.last_stats_at
+          $heartbeat.current_checkpoint = $state.current_checkpoint
+          $heartbeat | Add-Member -NotePropertyName independent_training_outcome -NotePropertyValue '${{ steps.train_only.outcome }}' -Force
+          $json = $heartbeat | ConvertTo-Json -Depth 5
+          [System.IO.File]::WriteAllText($env:FLYTWEETS_HEARTBEAT, $json, [System.Text.UTF8Encoding]::new($false))
+          Get-Content $env:FLYTWEETS_HEARTBEAT
+
+      - name: Upload refreshed health heartbeat
+        if: always() && steps.refresh_health.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: fly-tweets-health-heartbeat
+          path: ${{ env.FLYTWEETS_HEARTBEAT }}
+          overwrite: true
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Deliver health alert when required
         if: always()
         env:

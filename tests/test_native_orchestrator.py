@@ -111,6 +111,32 @@ class NativeOrchestratorContract(unittest.TestCase):
                 else:
                     self.assertIn("if ($LASTEXITCODE -ne 0)", body)
 
+    def test_post_training_health_refresh_preserves_initial_marker_isolation(self) -> None:
+        refresh_name = "Refresh health heartbeat after independent training"
+        upload_name = "Upload refreshed health heartbeat"
+        for name in (refresh_name, upload_name):
+            self.assertTrue(f"- name: {name}" in self.workflow, f"post-training health step missing: {name}")
+        marker = self.workflow.index("- name: Record successful autonomous cycle")
+        training = self.workflow.index("- name: Train Fly for future cycles (nonblocking)")
+        refresh = self.workflow.index(f"- name: {refresh_name}")
+        upload = self.workflow.index(f"- name: {upload_name}")
+        alert = self.workflow.index("- name: Deliver health alert when required")
+        self.assertLess(marker, training)
+        self.assertLess(training, refresh)
+        self.assertLess(refresh, upload)
+        self.assertLess(upload, alert)
+        refresh_block = self.workflow[refresh:upload]
+        upload_block = self.workflow[upload:alert]
+        self.assertIn("continue-on-error: true", refresh_block)
+        self.assertIn("always() && env.FLYTWEETS_HEARTBEAT != ''", refresh_block)
+        self.assertIn("steps.train_only.outcome == 'success'", refresh_block)
+        self.assertIn("steps.train_only.outcome == 'failure'", refresh_block)
+        self.assertIn("continue-on-error: true", upload_block)
+        self.assertIn("steps.refresh_health.outcome == 'success'", upload_block)
+        self.assertIn("overwrite: true", upload_block)
+        self.assertIn("name: fly-tweets-health-heartbeat", upload_block)
+        self.assertIn("$state.last_training_at", step_script(refresh_name))
+
 
 @unittest.skipUnless(shutil.which("powershell"), "requires Windows PowerShell")
 class NativeSchedulerHandoff(unittest.TestCase):
@@ -191,6 +217,32 @@ class IndependentTrainingEligibility(unittest.TestCase):
             )
         self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
         self.assertEqual(run.stdout.strip(), "2", "both zero-valued reward types remain eligible under production PowerShell")
+
+
+@unittest.skipUnless(shutil.which("powershell"), "requires Windows PowerShell")
+class PostTrainingHealthSnapshot(unittest.TestCase):
+    def test_refresh_reads_current_training_and_checkpoint_without_changing_marker(self) -> None:
+        script = step_script("Refresh health heartbeat after independent training")
+        powershell = Path(os.environ["WINDIR"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+        with tempfile.TemporaryDirectory(prefix="fly heartbeat ") as folder:
+            root = Path(folder)
+            state = root / "runtime-state.json"
+            heartbeat = root / "health-heartbeat.json"
+            marker = root / "success-marker.json"
+            marker.write_text('{"run_id": 123}', encoding="utf-8")
+            previous = {"generated_at": "2026-10-14T00:00:00Z", "last_training_at": "2026-10-14T00:00:00Z", "training_reference_at": "2026-10-14T00:00:00Z", "queue_horizon_at": "old", "last_stats_at": "old", "current_checkpoint": "old", "github_run_id": "123"}
+            current = {"last_training_at": "2026-11-05T22:00:00Z", "queue_horizon_at": "2026-11-07T23:00:00Z", "last_stats_at": "2026-11-05T21:00:00Z", "current_checkpoint": "new-checkpoint"}
+            heartbeat.write_text(json.dumps(previous), encoding="utf-8")
+            state.write_text(json.dumps(current), encoding="utf-8")
+            env = dict(os.environ, FLYTWEETS_STATE_DIR=str(root), FLYTWEETS_RUNTIME_STATE=str(state), FLYTWEETS_HEARTBEAT=str(heartbeat))
+            run = subprocess.run([str(powershell), "-NoProfile", "-NonInteractive", "-Command", script], capture_output=True, text=True, timeout=15, env=env, creationflags=subprocess.CREATE_NO_WINDOW)
+            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+            refreshed = json.loads(heartbeat.read_text(encoding="utf-8-sig"))
+            self.assertEqual(refreshed["last_training_at"], current["last_training_at"])
+            self.assertEqual(refreshed["training_reference_at"], current["last_training_at"])
+            self.assertEqual(refreshed["current_checkpoint"], "new-checkpoint")
+            self.assertEqual(refreshed["github_run_id"], "123")
+            self.assertEqual(marker.read_text(encoding="utf-8"), '{"run_id": 123}')
 
 
 if __name__ == "__main__":
