@@ -1,0 +1,15 @@
+{
+  "name": "fly-tweets-x-collector",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "install:chromium": "playwright install chromium",
+    "bootstrap:x": "node bootstrap-x-session.js",
+    "collect:cook": "node collect-cook-corpus.js"
+  },
+  "dependencies": {
+    "playwright": "1.63.0"
+  }
+}

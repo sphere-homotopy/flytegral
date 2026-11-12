@@ -1,0 +1,11 @@
+{
+  "min_age_hours": 24.0,
+  "view_weight": 1.0,
+  "like_rate_weight": 1.0,
+  "repost_rate_weight": 3.0,
+  "reply_rate_weight": 2.5,
+  "bookmark_rate_weight": 3.5,
+  "rate_scale": 100.0,
+  "smoothing_views": 100.0,
+  "smoothing_events": 0.5
+}
